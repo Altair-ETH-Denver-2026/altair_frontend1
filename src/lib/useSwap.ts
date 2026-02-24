@@ -198,3 +198,28 @@ export const useSwap = (explicitChain?: ChainKey) => {
       return tx.hash as string;
     });
 };
+
+/** Send native ETH to an address on the given chain. Returns tx hash. */
+export function useWithdraw(chainKey: ChainKey) {
+  const { authenticated } = usePrivy();
+  const { wallets } = useWallets();
+
+  return async (toAddress: string, amountEth: string): Promise<string> => {
+    if (!authenticated || !wallets?.length) {
+      throw new Error('No authenticated wallet available.');
+    }
+    const chainConfig = chainConfigs[chainKey];
+    if (!chainConfig) {
+      throw new Error('Unsupported chain.');
+    }
+    const wallet = wallets[0];
+    const ethereumProvider = await wallet.getEthereumProvider();
+    await ensureEvmChain(ethereumProvider, chainKey);
+    const provider = new ethers.BrowserProvider(ethereumProvider);
+    const signer = await provider.getSigner();
+    const valueWei = ethers.parseEther(amountEth);
+    const tx = await signer.sendTransaction({ to: toAddress as `0x${string}`, value: valueWei });
+    await tx.wait();
+    return tx.hash as string;
+  };
+}
