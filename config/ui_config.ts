@@ -5,7 +5,7 @@ export const X_SIZE = 25;
 
 export const WALLET_DISPLAY = {
   options: ['panel', 'drop_down'] as const,
-  active: 'panel' as 'panel' | 'drop_down',
+  active: 'drop_down' as 'panel' | 'drop_down',
 };
 
 export const MENU_ICONS = {

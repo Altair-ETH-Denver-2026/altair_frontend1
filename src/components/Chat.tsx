@@ -77,17 +77,11 @@ export default function Chat() {
 
     setIsExecutingSwap(true);
     try {
-      if (sell === 'ETH' && buy === 'WETH') {
-        const txHash = await executeSwap(sell, amount, buy);
-        return `Swap executed: wrapped ${amount} ETH into WETH.\n${txHash}`;
-      }
-
-      if (sell === 'ETH' && buy === 'USDC') {
-        const txHash = await executeSwap(sell, amount, buy);
-        return `Swap executed: swapped ${amount} ETH for USDC.\n${txHash}`;
-      }
-
-      return null;
+      const txHash = await executeSwap(sell, amount, buy);
+      const action = sell === 'ETH' && buy === 'WETH'
+        ? 'wrapped'
+        : 'swapped';
+      return `Swap executed: ${action} ${amount} ${sell} for ${buy}.\n${txHash}`;
     } finally {
       setIsExecutingSwap(false);
     }

@@ -1,5 +1,5 @@
 export const BLOCKCHAIN = 'ETH_SEPOLIA' as const;
-export const WRAP_ETH = true;
+export const WRAP_ETH = false;
 
 export const CHAINS = {
   BASE_SEPOLIA: 'BASE_SEPOLIA',

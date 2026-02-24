@@ -2,12 +2,12 @@
 
 import { usePrivy, useWallets } from '@privy-io/react-auth';
 import { ethers } from 'ethers';
-import { BLOCKCHAIN, CHAINS, WRAP_ETH, type ChainKey } from '../../config/blockchain_config';
-import { BASE_MAINNET, BASE_SEPOLIA, ETH_MAINNET, ETH_SEPOLIA, resolveRpcUrls } from '../../config/chain_info';
-import { WETH as BASE_WETH } from '../../config/token_info/base_tokens';
-import { WETH as BASE_SEPOLIA_WETH } from '../../config/token_info/base_testnet_sepolia_tokens';
-import { WETH as ETH_WETH } from '../../config/token_info/eth_tokens';
-import { WETH as ETH_SEPOLIA_WETH } from '../../config/token_info/eth_sepolia_testnet_tokens';
+import { BLOCKCHAIN, CHAINS, WRAP_ETH, type ChainKey } from '@config/blockchain_config';
+import { BASE_MAINNET, BASE_SEPOLIA, ETH_MAINNET, ETH_SEPOLIA, resolveRpcUrls } from '@config/chain_info';
+import { WETH as BASE_WETH } from '@config/token_info/base_tokens';
+import { WETH as BASE_SEPOLIA_WETH } from '@config/token_info/base_testnet_sepolia_tokens';
+import { WETH as ETH_WETH } from '@config/token_info/eth_tokens';
+import { WETH as ETH_SEPOLIA_WETH } from '@config/token_info/eth_sepolia_testnet_tokens';
 
 const chainConfigs = {
   BASE_SEPOLIA,
@@ -22,6 +22,14 @@ const tokenConfigs = {
   ETH_MAINNET: { WETH: ETH_WETH },
   BASE_MAINNET: { WETH: BASE_WETH },
 } as const;
+
+let swapQueue: Promise<void> = Promise.resolve();
+
+const withSwapQueue = async <T>(task: () => Promise<T>): Promise<T> => {
+  const run = swapQueue.then(task, task);
+  swapQueue = run.then(() => undefined, () => undefined);
+  return run;
+};
 
 const resolveSelectedChain = (explicitChain?: ChainKey) => {
   if (explicitChain) return explicitChain;
@@ -83,91 +91,106 @@ export const useSwap = (explicitChain?: ChainKey) => {
   const { authenticated } = usePrivy();
   const { wallets } = useWallets();
 
-  return async (sellToken: string, sellAmount: string, buyToken: string) => {
-    if (!authenticated || !wallets?.length) {
-      throw new Error('No authenticated wallet available.');
-    }
+  return async (sellToken: string, sellAmount: string, buyToken: string) =>
+    withSwapQueue(async () => {
+      if (!authenticated || !wallets?.length) {
+        throw new Error('No authenticated wallet available.');
+      }
 
-    const selectedChain = resolveSelectedChain(explicitChain);
-    console.log('[RPC] selectedChain:', selectedChain);
-    const chainConfig = chainConfigs[selectedChain];
-    console.log('[RPC] chainConfig rpcUrls:', chainConfig?.rpcUrls);
-    const tokenConfig = tokenConfigs[selectedChain];
-    if (!chainConfig) {
-      throw new Error('Unsupported chain configuration.');
-    }
+      const selectedChain = resolveSelectedChain(explicitChain);
+      console.log('[RPC] selectedChain:', selectedChain);
+      const chainConfig = chainConfigs[selectedChain];
+      console.log('[RPC] chainConfig rpcUrls:', chainConfig?.rpcUrls);
+      const tokenConfig = tokenConfigs[selectedChain];
+      if (!chainConfig) {
+        throw new Error('Unsupported chain configuration.');
+      }
 
-    const wallet = wallets[0];
-    const ethereumProvider = await wallet.getEthereumProvider();
-    await ensureEvmChain(ethereumProvider, selectedChain);
+      const wallet = wallets[0];
+      const ethereumProvider = await wallet.getEthereumProvider();
+      await ensureEvmChain(ethereumProvider, selectedChain);
 
-    const provider = new ethers.BrowserProvider(ethereumProvider);
-    const signer = await provider.getSigner();
-    const recipient = await signer.getAddress();
+      const provider = new ethers.BrowserProvider(ethereumProvider);
+      const signer = await provider.getSigner();
+      const managedSigner = new ethers.NonceManager(signer);
+      const recipient = await managedSigner.getAddress();
 
-    const normalizedSell = sellToken.toUpperCase();
-    const normalizedBuy = buyToken.toUpperCase();
-    const amountWei = ethers.parseEther(sellAmount);
+      const normalizedSell = sellToken.toUpperCase();
+      const normalizedBuy = buyToken.toUpperCase();
+      const amountWei = ethers.parseEther(sellAmount);
 
-    const effectiveSell = normalizedSell;
+      const effectiveSell = normalizedSell;
 
-    if (WRAP_ETH && normalizedSell === 'ETH' && normalizedBuy === 'WETH') {
-      const weth = new ethers.Contract(
-        tokenConfig.WETH.address,
-        ['function deposit() payable'],
-        signer,
-      );
+      if (WRAP_ETH && normalizedSell === 'ETH' && normalizedBuy === 'WETH') {
+        const weth = new ethers.Contract(
+          tokenConfig.WETH.address,
+          ['function deposit() payable'],
+          managedSigner,
+        );
 
-      const wrapTx = await weth.deposit({ value: amountWei });
-      await wrapTx.wait();
+        const wrapTx = await weth.deposit({ value: amountWei });
+        await wrapTx.wait();
 
-      return wrapTx.hash as string;
-    }
+        return wrapTx.hash as string;
+      }
 
-    const routeResponse = await fetch('/api/test-swap', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({
-        chain: selectedChain,
-        sellToken: effectiveSell,
-        buyToken: normalizedBuy,
-        amount: amountWei.toString(),
-        recipient,
-      }),
+      const routeResponse = await fetch('/api/test-swap', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          chain: selectedChain,
+          sellToken: effectiveSell,
+          buyToken: normalizedBuy,
+          amount: sellAmount,
+          recipient,
+        }),
+      });
+
+      if (!routeResponse.ok) {
+        const errorPayload = await routeResponse.json().catch(() => ({}));
+        throw new Error(errorPayload?.error ?? 'Failed to fetch swap route');
+      }
+
+      const routePayload = (await routeResponse.json()) as {
+        methodParameters?: { to: string; calldata: string; value: string };
+        sellTokenAddress?: string;
+      };
+
+      if (!routePayload.methodParameters) {
+        throw new Error('No swap route found');
+      }
+
+      if (effectiveSell !== 'ETH') {
+        const sellTokenAddress =
+          effectiveSell === 'WETH' ? tokenConfig.WETH.address : routePayload.sellTokenAddress;
+        if (!sellTokenAddress) {
+          throw new Error('Missing sell token address for approval');
+        }
+        const erc20Approve = new ethers.Contract(
+          sellTokenAddress,
+          ['function approve(address,uint256)'],
+          managedSigner,
+        );
+        const approveTx = await erc20Approve.approve(routePayload.methodParameters.to, ethers.MaxUint256);
+        await approveTx.wait();
+      }
+
+      const tx = await managedSigner.sendTransaction({
+        to: routePayload.methodParameters.to,
+        data: routePayload.methodParameters.calldata,
+        value: routePayload.methodParameters.value,
+        gasLimit: 1_000_000n,
+      });
+
+      await tx.wait();
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('altair:swap-complete', {
+            detail: { chain: selectedChain, sellToken: effectiveSell, buyToken: normalizedBuy },
+          })
+        );
+      }
+      return tx.hash as string;
     });
-
-    if (!routeResponse.ok) {
-      const errorPayload = await routeResponse.json().catch(() => ({}));
-      throw new Error(errorPayload?.error ?? 'Failed to fetch swap route');
-    }
-
-    const routePayload = (await routeResponse.json()) as {
-      methodParameters?: { to: string; calldata: string; value: string };
-    };
-
-    if (!routePayload.methodParameters) {
-      throw new Error('No swap route found');
-    }
-
-    if (effectiveSell === 'WETH') {
-      const wethApprove = new ethers.Contract(
-        tokenConfig.WETH.address,
-        ['function approve(address,uint256)'],
-        signer,
-      );
-
-      await wethApprove.approve(routePayload.methodParameters.to, ethers.MaxUint256);
-    }
-
-    const tx = await signer.sendTransaction({
-      to: routePayload.methodParameters.to,
-      data: routePayload.methodParameters.calldata,
-      value: routePayload.methodParameters.value,
-      gasLimit: 1_000_000n,
-    });
-
-    await tx.wait();
-    return tx.hash as string;
-  };
 };

@@ -19,6 +19,8 @@ export default function UserMenu() {
   const [swapMessage, setSwapMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [ethBalance, setEthBalance] = useClientState<string>('0');
   const [usdcBalance, setUsdcBalance] = useClientState<string>('0');
+  const [wethBalance, setWethBalance] = useClientState<string>('0');
+  const [daiBalance, setDaiBalance] = useClientState<string>('0');
   const [evmAddress, setEvmAddress] = useClientState<string>('');
   const [isNetworkOpen, setIsNetworkOpen] = useState(false);
   const [selectedChain, setSelectedChain] = useState<ChainKey>(BLOCKCHAIN);
@@ -54,6 +56,8 @@ export default function UserMenu() {
       if (!authenticated) {
         setEthBalance('0');
         setUsdcBalance('0');
+        setWethBalance('0');
+        setDaiBalance('0');
         setEvmAddress('');
         setIsWalletPanelOpen(false);
         if (typeof window !== 'undefined') {
@@ -78,6 +82,8 @@ export default function UserMenu() {
         const data = await res.json();
         if (data?.eth) setEthBalance(data.eth);
         if (data?.usdc) setUsdcBalance(data.usdc);
+        if (data?.weth) setWethBalance(data.weth);
+        if (data?.dai) setDaiBalance(data.dai);
         if (data?.address) {
           setEvmAddress(data.address);
           if (typeof window !== 'undefined') {
@@ -87,14 +93,36 @@ export default function UserMenu() {
       } catch {
         setEthBalance('0');
         setUsdcBalance('0');
+        setWethBalance('0');
+        setDaiBalance('0');
         setEvmAddress('');
       }
     };
 
     run();
 
-    return () => controller.abort();
-  }, [authenticated, selectedChain, setEthBalance, setUsdcBalance, setEvmAddress]);
+    if (typeof window !== 'undefined') {
+      window.addEventListener('altair:wallet-open', run);
+    }
+
+    const handleSwapComplete = (event: Event) => {
+      const detail = (event as CustomEvent).detail as { chain?: ChainKey } | undefined;
+      if (detail?.chain && detail.chain !== selectedChain) return;
+      run();
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('altair:swap-complete', handleSwapComplete);
+    }
+
+    return () => {
+      controller.abort();
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('altair:swap-complete', handleSwapComplete);
+        window.removeEventListener('altair:wallet-open', run);
+      }
+    };
+  }, [authenticated, selectedChain, setEthBalance, setUsdcBalance, setWethBalance, setDaiBalance, setEvmAddress]);
 
   if (!authenticated) return null;
 
@@ -205,6 +233,62 @@ export default function UserMenu() {
             </button>
             <div className="h-[1px] bg-gray-700 w-full" />
             <button
+              onClick={async () => {
+                setIsSwapping(true);
+                try {
+                  const txHash = await executeSwap('WETH', '0.000001', 'USDC');
+                  console.log('[Test Swap] Swap complete:', txHash);
+                  showSwapMessage({
+                    type: 'success',
+                    text: `Swap complete.\n${txHash}`,
+                  });
+                } catch (error) {
+                  console.error('[Test Swap] Swap failed:', error);
+                  const message = error instanceof Error ? error.message : 'Swap failed';
+                  showSwapMessage({
+                    type: 'error',
+                    text: message,
+                  });
+                } finally {
+                  setIsSwapping(false);
+                  setIsDevOpen(false);
+                }
+              }}
+              disabled={isSwapping}
+              className="flex w-full items-center px-4 py-3 text-sm text-gray-300 hover:bg-gray-800 transition-colors text-left"
+            >
+              <span className="flex-1">Test Swap: 0.000001 WETH for USDC</span>
+            </button>
+            <div className="h-[1px] bg-gray-700 w-full" />
+            <button
+              onClick={async () => {
+                setIsSwapping(true);
+                try {
+                  const txHash = await executeSwap('WETH', '0.00001', 'USDC');
+                  console.log('[Test Swap] Swap complete:', txHash);
+                  showSwapMessage({
+                    type: 'success',
+                    text: `Swap complete.\n${txHash}`,
+                  });
+                } catch (error) {
+                  console.error('[Test Swap] Swap failed:', error);
+                  const message = error instanceof Error ? error.message : 'Swap failed';
+                  showSwapMessage({
+                    type: 'error',
+                    text: message,
+                  });
+                } finally {
+                  setIsSwapping(false);
+                  setIsDevOpen(false);
+                }
+              }}
+              disabled={isSwapping}
+              className="flex w-full items-center px-4 py-3 text-sm text-gray-300 hover:bg-gray-800 transition-colors text-left"
+            >
+              <span className="flex-1">Test Swap: 0.00001 WETH for USDC</span>
+            </button>
+            <div className="h-[1px] bg-gray-700 w-full" />
+            <button
               onClick={() => setIsDevOpen(false)}
               className="flex w-full items-center px-4 py-3 text-sm text-gray-300 hover:bg-gray-800 transition-colors text-left"
             >
@@ -285,6 +369,9 @@ export default function UserMenu() {
             setIsProfileOpen(false);
             setIsDevOpen(false);
             setIsNetworkOpen(false);
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new Event('altair:wallet-open'));
+            }
           }}
           title="Wallet"
           className="flex items-center justify-center rounded-full border-[var(--border-color)] hover:border-[var(--highlight-color)] transition-all shadow-md cursor-pointer"
@@ -349,6 +436,30 @@ export default function UserMenu() {
                   : Number(usdcBalance).toFixed(BALANCE_DECIMALS)}
               </span>
             </div>
+            <div className="h-[1px] bg-gray-700 w-full" />
+            <div className="flex w-full items-center px-4 py-3 text-sm text-gray-300">
+              <span className="flex-1">WETH</span>
+              <span
+                className="text-gray-100 px-3 text-center whitespace-nowrap hover:whitespace-normal"
+                title={wethBalance}
+              >
+                {Number.isNaN(Number(wethBalance))
+                  ? wethBalance
+                  : Number(wethBalance).toFixed(BALANCE_DECIMALS)}
+              </span>
+            </div>
+            <div className="h-[1px] bg-gray-700 w-full" />
+            <div className="flex w-full items-center px-4 py-3 text-sm text-gray-300">
+              <span className="flex-1">DAI</span>
+              <span
+                className="text-gray-100 px-3 text-center whitespace-nowrap hover:whitespace-normal"
+                title={daiBalance}
+              >
+                {Number.isNaN(Number(daiBalance))
+                  ? daiBalance
+                  : Number(daiBalance).toFixed(BALANCE_DECIMALS)}
+              </span>
+            </div>
           </div>
         )}
       </div>
@@ -401,6 +512,30 @@ export default function UserMenu() {
               {Number.isNaN(Number(usdcBalance))
                 ? usdcBalance
                 : Number(usdcBalance).toFixed(BALANCE_DECIMALS)}
+            </span>
+          </div>
+          <div className="h-[1px] bg-gray-700 w-full" />
+          <div className="flex w-full items-center px-4 py-3 text-sm text-gray-300">
+            <span className="flex-1">WETH</span>
+            <span
+              className="text-gray-100 px-3 text-center whitespace-nowrap hover:whitespace-normal"
+              title={wethBalance}
+            >
+              {Number.isNaN(Number(wethBalance))
+                ? wethBalance
+                : Number(wethBalance).toFixed(BALANCE_DECIMALS)}
+            </span>
+          </div>
+          <div className="h-[1px] bg-gray-700 w-full" />
+          <div className="flex w-full items-center px-4 py-3 text-sm text-gray-300">
+            <span className="flex-1">DAI</span>
+            <span
+              className="text-gray-100 px-3 text-center whitespace-nowrap hover:whitespace-normal"
+              title={daiBalance}
+            >
+              {Number.isNaN(Number(daiBalance))
+                ? daiBalance
+                : Number(daiBalance).toFixed(BALANCE_DECIMALS)}
             </span>
           </div>
         </div>
