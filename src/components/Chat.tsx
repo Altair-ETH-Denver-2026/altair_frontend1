@@ -43,7 +43,8 @@ export default function Chat() {
     const trimmed = text.trim();
     const parseCandidate = (candidate: string) => {
       try {
-        return JSON.parse(candidate) as SwapIntent;
+        const parsed = JSON.parse(candidate) as SwapIntent;
+        return parsed?.type === 'SWAP_INTENT' ? parsed : null;
       } catch {
         return null;
       }
@@ -57,6 +58,17 @@ export default function Chat() {
     const lastBrace = trimmed.lastIndexOf('}');
     if (firstBrace >= 0 && lastBrace > firstBrace) {
       return parseCandidate(trimmed.slice(firstBrace, lastBrace + 1));
+    }
+
+    // JSON inside markdown code block (e.g. ```json ... ```)
+    const codeBlockMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (codeBlockMatch) {
+      const inner = codeBlockMatch[1].trim();
+      const innerFirst = inner.indexOf('{');
+      const innerLast = inner.lastIndexOf('}');
+      if (innerFirst >= 0 && innerLast > innerFirst) {
+        return parseCandidate(inner.slice(innerFirst, innerLast + 1));
+      }
     }
 
     return null;
@@ -77,11 +89,39 @@ export default function Chat() {
 
     setIsExecutingSwap(true);
     try {
-      const txHash = await executeSwap(sell, amount, buy);
-      const action = sell === 'ETH' && buy === 'WETH'
-        ? 'wrapped'
-        : 'swapped';
-      return `Swap executed: ${action} ${amount} ${sell} for ${buy}.\n${txHash}`;
+      // Supported pairs (must match /api/test-swap: ETH or WETH → WETH or USDC)
+      if (sell === 'ETH' && buy === 'WETH') {
+        const txHash = await executeSwap(sell, amount, buy);
+        return `Swap executed: wrapped ${amount} ETH into WETH.\n${txHash}`;
+      }
+      if (sell === 'ETH' && buy === 'USDC') {
+        const txHash = await executeSwap(sell, amount, buy);
+        return `Swap executed: swapped ${amount} ETH for USDC.\n${txHash}`;
+      }
+      if (sell === 'WETH' && buy === 'USDC') {
+        const txHash = await executeSwap(sell, amount, buy);
+        return `Swap executed: swapped ${amount} WETH for USDC.\n${txHash}`;
+      }
+      return null;
+    } catch (err) {
+      console.error('[Swap execution failed]', err);
+      const rawMsg = err instanceof Error ? err.message : 'Swap failed';
+      const isInsufficientFunds =
+        rawMsg.toLowerCase().includes('insufficient funds') ||
+        (err as { code?: string })?.code === 'INSUFFICIENT_FUNDS';
+      const isReplacementUnderpriced =
+        rawMsg.toLowerCase().includes('replacement') ||
+        rawMsg.toLowerCase().includes('underpriced') ||
+        (err as { code?: string })?.code === 'REPLACEMENT_UNDERPRICED';
+      let msg = rawMsg;
+      if (isInsufficientFunds) {
+        msg =
+          "Your wallet doesn't have enough ETH on this network (for the swap and gas). Get testnet ETH from a faucet (Base Sepolia) or add more ETH on mainnet.";
+      } else if (isReplacementUnderpriced) {
+        msg =
+          'A previous transaction may still be pending. Wait a minute and try again, or use Base Sepolia testnet (network selector → Base Testnet) to test with faucet ETH.';
+      }
+      return `Swap could not be executed: ${msg}`;
     } finally {
       setIsExecutingSwap(false);
     }
@@ -96,12 +136,23 @@ export default function Chat() {
     setIsLoading(true);
 
     try {
-      const privyAccessToken = authenticated ? await getAccessToken() : null;
+      // Prefer Privy SDK access token (refreshes if needed); fallback to localStorage for legacy/cookie-only flows
+      let accessToken: string | null = null;
+      if (authenticated && typeof getAccessToken === 'function') {
+        try {
+          accessToken = (await getAccessToken()) ?? null;
+        } catch {
+          accessToken = null;
+        }
+      }
+      if (!accessToken && typeof window !== 'undefined') {
+        accessToken = localStorage.getItem('privy:token');
+      }
       console.log('[0G][frontend] chat request', {
         backendUrl: process.env.NEXT_PUBLIC_BACKEND_URL ?? 'http://localhost:3001',
         messageBytes: new TextEncoder().encode(userMessage).length,
         historyCount: messages.length,
-        hasAccessToken: Boolean(privyAccessToken),
+        hasAccessToken: Boolean(accessToken),
       });
       const maxAttempts = 3;
       let response: Response | null = null;
@@ -112,11 +163,11 @@ export default function Chat() {
           response = await fetch('/api/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
             body: JSON.stringify({
               message: userMessage,
               history: messages.map(m => ({ role: m.role, content: m.content })),
-              // Include Privy access token for backend verification
-              accessToken: privyAccessToken ?? null,
+              accessToken,
             }),
           });
           if (!response.ok) {
