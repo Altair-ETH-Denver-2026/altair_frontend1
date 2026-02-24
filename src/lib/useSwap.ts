@@ -3,17 +3,19 @@
 import { usePrivy, useWallets } from '@privy-io/react-auth';
 import { ethers } from 'ethers';
 import { BLOCKCHAIN, CHAINS, WRAP_ETH, type ChainKey } from '@config/blockchain_config';
-import { BASE_MAINNET, BASE_SEPOLIA, ETH_MAINNET, ETH_SEPOLIA, resolveRpcUrls } from '@config/chain_info';
+import { ARBITRUM_ONE, BASE_MAINNET, BASE_SEPOLIA, ETH_MAINNET, ETH_SEPOLIA, resolveRpcUrls } from '@config/chain_info';
 import { WETH as BASE_WETH } from '@config/token_info/base_tokens';
 import { WETH as BASE_SEPOLIA_WETH } from '@config/token_info/base_testnet_sepolia_tokens';
 import { WETH as ETH_WETH } from '@config/token_info/eth_tokens';
 import { WETH as ETH_SEPOLIA_WETH } from '@config/token_info/eth_sepolia_testnet_tokens';
+import { WETH as ARBITRUM_WETH } from '@config/token_info/arbitrum_tokens';
 
 const chainConfigs = {
   BASE_SEPOLIA,
   ETH_SEPOLIA,
   ETH_MAINNET,
   BASE_MAINNET,
+  ARBITRUM_ONE,
 } as const;
 
 const tokenConfigs = {
@@ -21,6 +23,7 @@ const tokenConfigs = {
   ETH_SEPOLIA: { WETH: ETH_SEPOLIA_WETH },
   ETH_MAINNET: { WETH: ETH_WETH },
   BASE_MAINNET: { WETH: BASE_WETH },
+  ARBITRUM_ONE: { WETH: ARBITRUM_WETH },
 } as const;
 
 let swapQueue: Promise<void> = Promise.resolve();
@@ -54,6 +57,7 @@ const ensureEvmChain = async (
     ETH_SEPOLIA: { name: 'Sepolia', explorer: 'https://sepolia.etherscan.io' },
     BASE_MAINNET: { name: 'Base Mainnet', explorer: 'https://basescan.org' },
     BASE_SEPOLIA: { name: 'Base Sepolia', explorer: 'https://sepolia.basescan.org' },
+    ARBITRUM_ONE: { name: 'Arbitrum One', explorer: 'https://arbiscan.io' },
   };
 
   try {

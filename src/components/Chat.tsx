@@ -75,7 +75,7 @@ export default function Chat() {
   };
 
 
-  const maybeExecuteSwapIntent = async (aiResponse: string) => {
+  const maybeExecuteSwapIntent = async (aiResponse: string, accessToken: string | null) => {
     const intent = extractSwapIntent(aiResponse);
     if (!intent || intent.type !== 'SWAP_INTENT') return null;
 
@@ -89,20 +89,32 @@ export default function Chat() {
 
     setIsExecutingSwap(true);
     try {
-      // Supported pairs (must match /api/test-swap: ETH or WETH → WETH or USDC)
-      if (sell === 'ETH' && buy === 'WETH') {
-        const txHash = await executeSwap(sell, amount, buy);
-        return `Swap executed: wrapped ${amount} ETH into WETH.\n${txHash}`;
+      // Supported pairs (must match /api/test-swap: ETH, WETH, USDC, USDT, DAI in any direction)
+      const txHash = await executeSwap(sell, amount, buy);
+      const chain =
+        (typeof window !== 'undefined' && localStorage.getItem('selectedChain')) || 'BASE_SEPOLIA';
+      if (accessToken) {
+        try {
+          await fetch('/api/record-swap', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({
+              accessToken,
+              chain,
+              sellToken: sell,
+              buyToken: buy,
+              sellAmount: amount,
+              txHash,
+            }),
+          });
+        } catch (e) {
+          console.warn('[record-swap] failed', e);
+        }
       }
-      if (sell === 'ETH' && buy === 'USDC') {
-        const txHash = await executeSwap(sell, amount, buy);
-        return `Swap executed: swapped ${amount} ETH for USDC.\n${txHash}`;
-      }
-      if (sell === 'WETH' && buy === 'USDC') {
-        const txHash = await executeSwap(sell, amount, buy);
-        return `Swap executed: swapped ${amount} WETH for USDC.\n${txHash}`;
-      }
-      return null;
+      const action =
+        sell === 'ETH' && buy === 'WETH' ? 'wrapped' : 'swapped';
+      return `Swap executed: ${action} ${amount} ${sell} for ${buy}.\n${txHash}`;
     } catch (err) {
       console.error('[Swap execution failed]', err);
       const rawMsg = err instanceof Error ? err.message : 'Swap failed';
@@ -202,7 +214,7 @@ export default function Chat() {
         hasContent: typeof data?.content === 'string',
       });
       
-      const executionNote = await maybeExecuteSwapIntent(content);
+      const executionNote = await maybeExecuteSwapIntent(content, accessToken);
       if (executionNote) {
         console.log('[Swap Intent]', data.content);
       }

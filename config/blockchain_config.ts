@@ -7,6 +7,7 @@ export const CHAINS = {
   ETH_SEPOLIA: 'ETH_SEPOLIA',
   ETH_MAINNET: 'ETH_MAINNET',
   BASE_MAINNET: 'BASE_MAINNET',
+  ARBITRUM_ONE: 'ARBITRUM_ONE',
 } as const;
 
 export type ChainKey = keyof typeof CHAINS;

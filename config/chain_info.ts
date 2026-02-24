@@ -65,3 +65,17 @@ export const BASE_MAINNET = {
     swapRouter: '',
   },
 };
+
+export const ARBITRUM_ONE = {
+  chainId: 42161,
+  rpcUrls: [
+    `https://arb-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY_PLACEHOLDER}`,
+    'https://arb1.arbitrum.io/rpc',
+  ],
+  scanUrl: 'https://arbiscan.io',
+  uniswapAddresses: {
+    router: '',
+    factory: '',
+    swapRouter: '',
+  },
+};
