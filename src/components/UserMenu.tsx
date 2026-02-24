@@ -6,7 +6,7 @@ import { useSwap, useWithdraw } from '../lib/useSwap';
 import { ethers } from 'ethers';
 import { UserRound, LogOut, Settings, Wallet, Wrench, Copy, Globe2, Check, ArrowUpRight } from 'lucide-react';
 import { useEffect as useClientEffect, useState as useClientState } from 'react';
-import { BLOCKCHAIN, CHAINS, type ChainKey } from '../../config/blockchain_config';
+import { BLOCKCHAIN, CHAINS, isSolanaChain, type ChainKey } from '../../config/blockchain_config';
 import { BALANCE_DECIMALS, MENU_ICONS, WALLET_DISPLAY, X_SIZE } from '../../config/ui_config';
 
 export default function UserMenu() {
@@ -22,6 +22,7 @@ export default function UserMenu() {
   const [usdcBalance, setUsdcBalance] = useClientState<string>('0');
   const [wethBalance, setWethBalance] = useClientState<string>('0');
   const [daiBalance, setDaiBalance] = useClientState<string>('0');
+  const [solBalance, setSolBalance] = useClientState<string>('0');
   const [evmAddress, setEvmAddress] = useClientState<string>('');
   const [isNetworkOpen, setIsNetworkOpen] = useState(false);
   const [selectedChain, setSelectedChain] = useState<ChainKey>(BLOCKCHAIN);
@@ -65,6 +66,7 @@ export default function UserMenu() {
         setUsdcBalance('0');
         setWethBalance('0');
         setDaiBalance('0');
+        setSolBalance('0');
         setEvmAddress('');
         setIsWalletPanelOpen(false);
         if (typeof window !== 'undefined') {
@@ -91,6 +93,7 @@ export default function UserMenu() {
         if (data?.usdc) setUsdcBalance(data.usdc);
         if (data?.weth) setWethBalance(data.weth);
         if (data?.dai) setDaiBalance(data.dai);
+        if (data?.sol) setSolBalance(data.sol);
         if (data?.address) {
           setEvmAddress(data.address);
           if (typeof window !== 'undefined') {
@@ -102,6 +105,7 @@ export default function UserMenu() {
         setUsdcBalance('0');
         setWethBalance('0');
         setDaiBalance('0');
+        setSolBalance('0');
         setEvmAddress('');
       }
     };
@@ -129,7 +133,7 @@ export default function UserMenu() {
         window.removeEventListener('altair:wallet-open', run);
       }
     };
-  }, [authenticated, selectedChain, setEthBalance, setUsdcBalance, setWethBalance, setDaiBalance, setEvmAddress]);
+  }, [authenticated, selectedChain, setEthBalance, setUsdcBalance, setWethBalance, setDaiBalance, setSolBalance, setEvmAddress]);
 
   if (!authenticated) return null;
 
@@ -335,13 +339,9 @@ export default function UserMenu() {
         </button>
         {isNetworkOpen && (
           <div className="absolute right-0 mt-3 w-48 rounded-xl bg-gray-900 border border-gray-700 shadow-2xl z-[100] overflow-hidden flex flex-col">
-            {[{ label: 'ETH Mainnet', key: 'ETH_MAINNET' as ChainKey }, { label: 'Sepolia Testnet', key: 'ETH_SEPOLIA' as ChainKey }, { label: 'Base Mainnet', key: 'BASE_MAINNET' as ChainKey }, { label: 'Base Testnet', key: 'BASE_SEPOLIA' as ChainKey }, { label: 'Solana Mainnet', key: null as ChainKey | null }].map(({ label, key }) => {
+            {[{ label: 'ETH Mainnet', key: 'ETH_MAINNET' as ChainKey }, { label: 'Sepolia Testnet', key: 'ETH_SEPOLIA' as ChainKey }, { label: 'Base Mainnet', key: 'BASE_MAINNET' as ChainKey }, { label: 'Base Testnet', key: 'BASE_SEPOLIA' as ChainKey }, { label: 'Arbitrum One', key: 'ARBITRUM_ONE' as ChainKey }, { label: 'Solana Mainnet', key: 'SOLANA_MAINNET' as ChainKey }].map(({ label, key }) => {
               const isSelected = key ? selectedChain === key : false;
               const handleClick = () => {
-                if (!key) {
-                  setIsNetworkOpen(false);
-                  return;
-                }
                 setSelectedChain(key);
                 if (typeof window !== 'undefined') {
                   localStorage.setItem('selectedChain', key);
@@ -421,14 +421,15 @@ export default function UserMenu() {
             </div>
             <div className="h-[1px] bg-gray-700 w-full" />
             <div className="flex w-full items-center px-4 py-3 text-sm text-gray-300">
-              <span className="flex-1">ETH</span>
+              <span className="flex-1">{isSolanaChain(selectedChain) ? 'SOL' : 'ETH'}</span>
               <span
                 className="text-gray-100 px-3 text-center whitespace-nowrap hover:whitespace-normal"
-                title={ethBalance}
+                title={isSolanaChain(selectedChain) ? solBalance : ethBalance}
               >
-                {Number.isNaN(Number(ethBalance))
-                  ? ethBalance
-                  : Number(ethBalance).toFixed(BALANCE_DECIMALS)}
+                {(() => {
+                  const bal = isSolanaChain(selectedChain) ? solBalance : ethBalance;
+                  return Number.isNaN(Number(bal)) ? bal : Number(bal).toFixed(BALANCE_DECIMALS);
+                })()}
               </span>
             </div>
             <div className="h-[1px] bg-gray-700 w-full" />
@@ -444,6 +445,8 @@ export default function UserMenu() {
               </span>
             </div>
             <div className="h-[1px] bg-gray-700 w-full" />
+            {!isSolanaChain(selectedChain) && (
+            <>
             <div className="flex w-full items-center px-4 py-3 text-sm text-gray-300">
               <span className="flex-1">WETH</span>
               <span
@@ -482,6 +485,8 @@ export default function UserMenu() {
               <ArrowUpRight className="w-4 h-4 mr-3" />
               Withdraw
             </button>
+            </>
+            )}
           </div>
         )}
       </div>
@@ -514,14 +519,15 @@ export default function UserMenu() {
           </div>
           <div className="h-[1px] bg-gray-700 w-full" />
           <div className="flex w-full items-center px-4 py-3 text-sm text-gray-300">
-            <span className="flex-1">ETH</span>
+            <span className="flex-1">{isSolanaChain(selectedChain) ? 'SOL' : 'ETH'}</span>
             <span
               className="text-gray-100 px-3 text-center whitespace-nowrap hover:whitespace-normal"
-              title={ethBalance}
+              title={isSolanaChain(selectedChain) ? solBalance : ethBalance}
             >
-              {Number.isNaN(Number(ethBalance))
-                ? ethBalance
-                : Number(ethBalance).toFixed(BALANCE_DECIMALS)}
+              {(() => {
+                const bal = isSolanaChain(selectedChain) ? solBalance : ethBalance;
+                return Number.isNaN(Number(bal)) ? bal : Number(bal).toFixed(BALANCE_DECIMALS);
+              })()}
             </span>
           </div>
           <div className="h-[1px] bg-gray-700 w-full" />
@@ -536,6 +542,8 @@ export default function UserMenu() {
                 : Number(usdcBalance).toFixed(BALANCE_DECIMALS)}
             </span>
           </div>
+          {!isSolanaChain(selectedChain) && (
+          <>
           <div className="h-[1px] bg-gray-700 w-full" />
           <div className="flex w-full items-center px-4 py-3 text-sm text-gray-300">
             <span className="flex-1">WETH</span>
@@ -575,6 +583,8 @@ export default function UserMenu() {
             <ArrowUpRight className="w-4 h-4 mr-3" />
             Withdraw
           </button>
+          </>
+          )}
         </div>
       )}
 

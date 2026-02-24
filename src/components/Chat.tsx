@@ -7,6 +7,8 @@ import { ShieldCheck, Send, Loader2 } from 'lucide-react';
 import Logo from '../image/logo.png';
 import { usePrivy } from '@privy-io/react-auth';
 import { useSwap } from '../lib/useSwap';
+import { useSolanaSwap } from '../lib/useSolanaSwap';
+import { isSolanaChain, type ChainKey } from '../../config/blockchain_config';
 import { CHAT_PANEL } from '../../config/ui_config';
 
 interface Message {
@@ -33,6 +35,7 @@ const SAMPLE_PROMPTS = [
 export default function Chat() {
   const { authenticated, getAccessToken } = usePrivy();
   const executeSwap = useSwap();
+  const executeSolanaSwap = useSolanaSwap();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -97,10 +100,15 @@ export default function Chat() {
 
     setIsExecutingSwap(true);
     try {
-      // Supported pairs (must match /api/test-swap: ETH, WETH, USDC, USDT, DAI in any direction)
-      const txHash = await executeSwap(sell, amount, buy);
       const chain =
         (typeof window !== 'undefined' && localStorage.getItem('selectedChain')) || 'BASE_SEPOLIA';
+      const isSolana = isSolanaChain(chain as ChainKey);
+      const solPair = (sell === 'SOL' && buy === 'USDC') || (sell === 'USDC' && buy === 'SOL');
+
+      const txHash = isSolana && solPair
+        ? await executeSolanaSwap(sell, amount, buy)
+        : await executeSwap(sell, amount, buy);
+
       if (accessToken) {
         try {
           await fetch('/api/record-swap', {
@@ -120,9 +128,23 @@ export default function Chat() {
           console.warn('[record-swap] failed', e);
         }
       }
+      const explorerUrl = isSolana
+        ? `https://solscan.io/tx/${txHash}`
+        : chain === 'BASE_SEPOLIA'
+          ? `https://sepolia.basescan.org/tx/${txHash}`
+          : chain === 'ETH_SEPOLIA'
+            ? `https://sepolia.etherscan.io/tx/${txHash}`
+            : chain === 'BASE_MAINNET'
+              ? `https://basescan.org/tx/${txHash}`
+              : chain === 'ETH_MAINNET'
+                ? `https://etherscan.io/tx/${txHash}`
+                : chain === 'ARBITRUM_ONE'
+                  ? `https://arbiscan.io/tx/${txHash}`
+                  : null;
       const action =
         sell === 'ETH' && buy === 'WETH' ? 'wrapped' : 'swapped';
-      return `Swap executed: ${action} ${amount} ${sell} for ${buy}.\n${txHash}`;
+      const linkLine = explorerUrl ? `\n${explorerUrl}` : '';
+      return `Swap executed: ${action} ${amount} ${sell} for ${buy}.\n${txHash}${linkLine}`;
     } catch (err) {
       console.error('[Swap execution failed]', err);
       const rawMsg = err instanceof Error ? err.message : 'Swap failed';

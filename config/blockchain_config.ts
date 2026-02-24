@@ -8,6 +8,11 @@ export const CHAINS = {
   ETH_MAINNET: 'ETH_MAINNET',
   BASE_MAINNET: 'BASE_MAINNET',
   ARBITRUM_ONE: 'ARBITRUM_ONE',
+  SOLANA_MAINNET: 'SOLANA_MAINNET',
 } as const;
 
 export type ChainKey = keyof typeof CHAINS;
+
+export function isSolanaChain(chain: ChainKey): boolean {
+  return chain === 'SOLANA_MAINNET';
+}
