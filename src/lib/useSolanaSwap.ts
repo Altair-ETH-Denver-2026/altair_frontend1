@@ -1,8 +1,10 @@
 'use client';
 
 import { useCallback } from 'react';
-import { usePrivy, useWallets } from '@privy-io/react-auth';
+import { usePrivy } from '@privy-io/react-auth';
+import { useWallets, useSignAndSendTransaction } from '@privy-io/react-auth/solana';
 import type { ChainKey } from '@config/blockchain_config';
+import bs58 from 'bs58';
 
 const SOL_MINT = 'So11111111111111111111111111111111111111112';
 const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
@@ -24,15 +26,18 @@ function toRawAmount(symbol: string, amount: string): string {
 
 /**
  * Solana (Jupiter) swap for SOL/USDC when chain is SOLANA_MAINNET.
+ * Uses Privy's recommended Solana flow: @privy-io/react-auth/solana hooks
+ * (useWallets + useSignAndSendTransaction) with RPC from @solana/kit via Privy config.
  * Returns tx signature string or throws.
  */
 export function useSolanaSwap(_explicitChain?: ChainKey) {
   const { authenticated } = usePrivy();
-  const { wallets } = useWallets();
+  const { wallets: solanaWallets } = useWallets();
+  const { signAndSendTransaction } = useSignAndSendTransaction();
 
   return useCallback(
     async (sellToken: string, sellAmount: string, buyToken: string): Promise<string> => {
-      if (!authenticated || !wallets?.length) {
+      if (!authenticated || !solanaWallets?.length) {
         throw new Error('No authenticated wallet available.');
       }
       const sell = sellToken.toUpperCase();
@@ -52,11 +57,14 @@ export function useSolanaSwap(_explicitChain?: ChainKey) {
       );
       if (!quoteRes.ok) {
         const err = await quoteRes.json().catch(() => ({}));
+        if (quoteRes.status === 403) {
+          throw new Error('Solana RPC rate limited (403). Set NEXT_PUBLIC_SOLANA_RPC_URL to a custom RPC (e.g. Helius).');
+        }
         throw new Error(err?.error ?? `Quote failed: ${quoteRes.status}`);
       }
       const quoteResponse = await quoteRes.json();
 
-      const solanaWallet = wallets.find((w) => (w as { chainType?: string }).chainType === 'solana');
+      const solanaWallet = solanaWallets[0];
       if (!solanaWallet) {
         throw new Error('No Solana wallet found. Add a Solana wallet in Privy.');
       }
@@ -81,23 +89,15 @@ export function useSolanaSwap(_explicitChain?: ChainKey) {
       const buf = Buffer.from(base64, 'base64');
       const txBytes = new Uint8Array(buf);
 
-      const { VersionedTransaction, Connection } = await import('@solana/web3.js');
-      const tx = VersionedTransaction.deserialize(txBytes);
-      const rpcUrl = process.env.NEXT_PUBLIC_SOLANA_RPC_URL ?? 'https://api.mainnet-beta.solana.com';
-      const connection = new Connection(rpcUrl);
-      const signer = (solanaWallet as { signAndSendTransaction?: (tx: { serialize: () => Uint8Array }) => Promise<{ signature: string }> }).signAndSendTransaction;
-      if (typeof signer === 'function') {
-        const result = await signer(tx);
-        return result?.signature ?? '';
-      }
-      const signed = await (solanaWallet as { signTransaction?: (tx: unknown) => Promise<unknown> }).signTransaction?.(tx);
-      if (signed) {
-        const serialized = (signed as { serialize: () => Uint8Array }).serialize();
-        const sig = await connection.sendRawTransaction(serialized, { skipPreflight: false });
-        return sig;
-      }
-      throw new Error('Could not sign Solana transaction. Ensure Privy Solana wallet is connected.');
+      // Privy-recommended Solana flow: signAndSendTransaction from @privy-io/react-auth/solana.
+      // Requires PrivyProvider config.solana.rpcs['solana:mainnet'] (createSolanaRpc from @solana/kit).
+      const { signature } = await signAndSendTransaction({
+        transaction: txBytes,
+        wallet: solanaWallet,
+        chain: 'solana:mainnet',
+      });
+      return bs58.encode(signature);
     },
-    [authenticated, wallets]
+    [authenticated, solanaWallets, signAndSendTransaction]
   );
 }
