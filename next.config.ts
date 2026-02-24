@@ -12,6 +12,19 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+  async headers() {
+    return [
+      {
+        source: '/api/:path*',
+        headers: [
+          {
+            key: 'x-forwarded-timeout-ms',
+            value: '60000',
+          },
+        ],
+      },
+    ];
+  },
 };
 
 export default nextConfig;

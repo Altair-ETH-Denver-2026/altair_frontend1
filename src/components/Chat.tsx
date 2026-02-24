@@ -24,7 +24,7 @@ interface SwapIntent {
 }
 
 export default function Chat() {
-  const { authenticated } = usePrivy();
+  const { authenticated, getAccessToken } = usePrivy();
   const executeSwap = useSwap();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -102,20 +102,62 @@ export default function Chat() {
     setIsLoading(true);
 
     try {
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: userMessage,
-          history: messages.map(m => ({ role: m.role, content: m.content })),
-          // Include Privy access token if available in localStorage (Privy stores it for the session)
-          accessToken: localStorage.getItem('privy:token') ?? null,
-        }),
+      const privyAccessToken = authenticated ? await getAccessToken() : null;
+      console.log('[0G][frontend] chat request', {
+        backendUrl: process.env.NEXT_PUBLIC_BACKEND_URL ?? 'http://localhost:3001',
+        messageBytes: new TextEncoder().encode(userMessage).length,
+        historyCount: messages.length,
+        hasAccessToken: Boolean(privyAccessToken),
       });
+      const maxAttempts = 3;
+      let response: Response | null = null;
+      let lastError: unknown = null;
 
-      const data = await response.json();
+      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        try {
+          response = await fetch('/api/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              message: userMessage,
+              history: messages.map(m => ({ role: m.role, content: m.content })),
+              // Include Privy access token for backend verification
+              accessToken: privyAccessToken ?? null,
+            }),
+          });
+          if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Chat request failed with status ${response.status}: ${errorText}`);
+          }
+          break;
+        } catch (err) {
+          lastError = err;
+          console.warn('[0G][frontend] chat request failed', { attempt, error: err });
+          if (attempt < maxAttempts) {
+            await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
+          }
+        }
+      }
+
+      if (!response) {
+        throw lastError ?? new Error('Chat request failed after retries');
+      }
+
+      const responseText = await response.text();
+      let data: { content?: string; zgHash?: string | null; zgError?: string | null } = {};
+      try {
+        data = JSON.parse(responseText) as { content?: string; zgHash?: string | null; zgError?: string | null };
+      } catch (err) {
+        throw new Error(`Chat response was not valid JSON: ${responseText}`);
+      }
+      const content = typeof data.content === 'string' ? data.content : '';
+      console.log('[0G][frontend] chat response', {
+        zgHash: data?.zgHash ?? null,
+        zgError: data?.zgError ?? null,
+        hasContent: typeof data?.content === 'string',
+      });
       
-      const executionNote = await maybeExecuteSwapIntent(data.content);
+      const executionNote = await maybeExecuteSwapIntent(content);
       if (executionNote) {
         console.log('[Swap Intent]', data.content);
       }
@@ -127,12 +169,12 @@ export default function Chat() {
 
         return [
           ...prev,
-          {
-            role: 'assistant',
-            content: data.content,
-            zgHash: data.zgHash,
-            zgError: data.zgError,
-          },
+            {
+              role: 'assistant',
+              content,
+              zgHash: data.zgHash,
+              zgError: data.zgError,
+            },
         ];
       });
     } catch (error) {

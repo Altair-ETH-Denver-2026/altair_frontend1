@@ -3,6 +3,7 @@
 import React from 'react';
 import Link from 'next/link';
 import { usePrivy } from '@privy-io/react-auth';
+import { useUserSync } from '../lib/useUserSync';
 import UserMenu from '../components/UserMenu';
 import Chat from '../components/Chat';
 import Logo from '../image/logo.png';
@@ -11,6 +12,7 @@ import { HOME_ICON, MENU_ICONS, TITLE_PANEL } from '../../config/ui_config';
 
 export default function Home() {
   const { login, authenticated } = usePrivy();
+  useUserSync();
 
   return (
     <main className="relative min-h-screen w-full bg-black text-white flex flex-col items-center justify-center p-8">
