@@ -177,6 +177,8 @@ export default function Chat() {
       const maxAttempts = 3;
       let response: Response | null = null;
       let lastError: unknown = null;
+      const selectedChain =
+        (typeof window !== 'undefined' && localStorage.getItem('selectedChain')) || undefined;
 
       for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
         try {
@@ -188,6 +190,7 @@ export default function Chat() {
               message: messageToSend,
               history: messages.map(m => ({ role: m.role, content: m.content })),
               accessToken,
+              selectedChain,
             }),
           });
           if (!response.ok) {
