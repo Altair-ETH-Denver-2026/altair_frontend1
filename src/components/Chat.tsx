@@ -6,7 +6,12 @@ import { SpinningLogo } from './SpinningLogo';
 import { ShieldCheck, Send, Loader2 } from 'lucide-react';
 import Logo from '../image/logo.png';
 import { usePrivy } from '@privy-io/react-auth';
+import { withWaitLogger } from '../lib/waitLogger';
 import { useSwap } from '../lib/useSwap';
+import { useSolanaSwap } from '../lib/useSolanaSwap';
+import { getCachedPrivyAccessToken } from '../lib/privyTokenCache';
+import { BLOCKCHAIN, CHAINS, type ChainKey } from '../../config/blockchain_config';
+import * as SolanaTokens from '../../config/token_info/solana_tokens';
 import { CHAT_PANEL } from '../../config/ui_config';
 
 interface Message {
@@ -14,6 +19,7 @@ interface Message {
   content: string;
   zgHash?: string | null;
   zgError?: string | null;
+  cid?: string | null;
 }
 
 interface SwapIntent {
@@ -23,9 +29,25 @@ interface SwapIntent {
   amount: number | string;
 }
 
+type SolanaTokenConfig = { symbol?: string; name?: string; address?: string; decimals?: number };
+
+const SOLANA_TOKEN_MAP = Object.values(SolanaTokens as Record<string, SolanaTokenConfig>)
+  .reduce<Record<string, SolanaTokenConfig>>((acc, token) => {
+    if (!token || typeof token !== 'object') return acc;
+    const symbol = typeof token.symbol === 'string' ? token.symbol.toUpperCase() : null;
+    if (symbol) acc[symbol] = token;
+    return acc;
+  }, {});
+
+const isMissingSolanaToken = (symbol: string) => {
+  const entry = SOLANA_TOKEN_MAP[symbol.toUpperCase()];
+  return !entry || !entry.address;
+};
+
 export default function Chat() {
   const { authenticated, getAccessToken } = usePrivy();
   const executeSwap = useSwap();
+  const executeSolanaSwap = useSolanaSwap();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -63,7 +85,85 @@ export default function Chat() {
   };
 
 
-  const maybeExecuteSwapIntent = async (aiResponse: string) => {
+  const resolveSelectedChain = (): ChainKey => {
+    if (typeof window === 'undefined') return BLOCKCHAIN;
+    const stored = localStorage.getItem('selectedChain');
+    if (stored && stored in CHAINS) return stored as ChainKey;
+    return BLOCKCHAIN;
+  };
+
+  const prefetchSolanaTokensForIntent = async (intent: SwapIntent) => {
+    const sell = intent.sell?.toUpperCase();
+    const buy = intent.buy?.toUpperCase();
+    if (!sell || !buy) return;
+    const selectedChain = resolveSelectedChain();
+    if (selectedChain !== 'SOLANA_MAINNET') return;
+    const sellNeedsLookup = isMissingSolanaToken(sell);
+    const buyNeedsLookup = isMissingSolanaToken(buy);
+    if (!sellNeedsLookup && !buyNeedsLookup) return;
+    try {
+      console.log('[Swap Intent] Solana token prefetch', {
+        sell,
+        buy,
+        sellNeedsLookup,
+        buyNeedsLookup,
+      });
+      const [sellRes, buyRes] = await Promise.all([
+        sellNeedsLookup
+          ? withWaitLogger(
+              {
+                file: 'altair_frontend1/src/components/Chat.tsx',
+                target: '/api/token-mint',
+                description: 'Solana sell token mint lookup',
+              },
+              () =>
+                fetch('/api/token-mint', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ q: sell }),
+                })
+            )
+          : Promise.resolve(null),
+        buyNeedsLookup
+          ? withWaitLogger(
+              {
+                file: 'altair_frontend1/src/components/Chat.tsx',
+                target: '/api/token-mint',
+                description: 'Solana buy token mint lookup',
+              },
+              () =>
+                fetch('/api/token-mint', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ q: buy }),
+                })
+            )
+          : Promise.resolve(null),
+      ]);
+      if (sellRes && sellRes.ok) {
+        const payload = await sellRes.json();
+        console.log('[Swap Intent] Solana token lookup (sell)', {
+          query: sell,
+          mint: payload?.mint ?? null,
+          token: payload?.token ?? null,
+          candidates: payload?.candidates ?? null,
+        });
+      }
+      if (buyRes && buyRes.ok) {
+        const payload = await buyRes.json();
+        console.log('[Swap Intent] Solana token lookup (buy)', {
+          query: buy,
+          mint: payload?.mint ?? null,
+          token: payload?.token ?? null,
+          candidates: payload?.candidates ?? null,
+        });
+      }
+    } catch (prefetchErr) {
+      console.warn('[Swap Intent] Solana token prefetch failed:', prefetchErr);
+    }
+  };
+
+  const maybeExecuteSwapIntent = async (aiResponse: string, cid?: string | null) => {
     const intent = extractSwapIntent(aiResponse);
     if (!intent || intent.type !== 'SWAP_INTENT') return null;
 
@@ -75,13 +175,23 @@ export default function Chat() {
       return null;
     }
 
+    const selectedChain = resolveSelectedChain();
     setIsExecutingSwap(true);
     try {
-      const txHash = await executeSwap(sell, amount, buy);
-      const action = sell === 'ETH' && buy === 'WETH'
+      const normalizedSell = selectedChain === 'SOLANA_MAINNET' && sell === 'ETH' ? 'SOL' : sell;
+      const normalizedBuy = selectedChain === 'SOLANA_MAINNET' && buy === 'ETH' ? 'SOL' : buy;
+      const result =
+        selectedChain === 'SOLANA_MAINNET'
+          ? await executeSolanaSwap(normalizedSell, amount, normalizedBuy, cid)
+          : await executeSwap(sell, amount, buy, cid);
+      const { txHash, buyAmount } =
+        selectedChain === 'SOLANA_MAINNET'
+          ? { txHash: result as string, buyAmount: 'unknown' }
+          : { txHash: result as string, buyAmount: 'unknown' };
+      const action = normalizedSell === 'ETH' && normalizedBuy === 'WETH'
         ? 'wrapped'
         : 'swapped';
-      return `Swap executed: ${action} ${amount} ${sell} for ${buy}.\n${txHash}`;
+      return `Swap executed: ${action} ${amount} ${normalizedSell} for ${buyAmount} ${normalizedBuy}.\n${txHash}`;
     } finally {
       setIsExecutingSwap(false);
     }
@@ -96,7 +206,16 @@ export default function Chat() {
     setIsLoading(true);
 
     try {
-      const privyAccessToken = authenticated ? await getAccessToken() : null;
+      const privyAccessToken = authenticated
+        ? await withWaitLogger(
+            {
+              file: 'altair_frontend1/src/components/Chat.tsx',
+              target: 'Privy getAccessToken',
+              description: 'access token for chat request',
+            },
+            () => getCachedPrivyAccessToken(getAccessToken)
+          )
+        : null;
       console.log('[0G][frontend] chat request', {
         backendUrl: process.env.NEXT_PUBLIC_BACKEND_URL ?? 'http://localhost:3001',
         messageBytes: new TextEncoder().encode(userMessage).length,
@@ -109,16 +228,24 @@ export default function Chat() {
 
       for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
         try {
-          response = await fetch('/api/chat', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              message: userMessage,
-              history: messages.map(m => ({ role: m.role, content: m.content })),
-              // Include Privy access token for backend verification
-              accessToken: privyAccessToken ?? null,
-            }),
-          });
+          response = await withWaitLogger(
+            {
+              file: 'altair_frontend1/src/components/Chat.tsx',
+              target: '/api/chat',
+              description: 'chat response',
+            },
+            () =>
+              fetch('/api/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  message: userMessage,
+                  history: messages.map(m => ({ role: m.role, content: m.content })),
+                  // Include Privy access token for backend verification
+                  accessToken: privyAccessToken ?? null,
+                }),
+              })
+          );
           if (!response.ok) {
             const errorText = await response.text();
             throw new Error(`Chat request failed with status ${response.status}: ${errorText}`);
@@ -128,7 +255,14 @@ export default function Chat() {
           lastError = err;
           console.warn('[0G][frontend] chat request failed', { attempt, error: err });
           if (attempt < maxAttempts) {
-            await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
+            await withWaitLogger(
+              {
+                file: 'altair_frontend1/src/components/Chat.tsx',
+                target: 'retry backoff',
+                description: `waiting before chat retry ${attempt + 1}`,
+              },
+              () => new Promise((resolve) => setTimeout(resolve, 1000 * attempt))
+            );
           }
         }
       }
@@ -137,8 +271,15 @@ export default function Chat() {
         throw lastError ?? new Error('Chat request failed after retries');
       }
 
-      const responseText = await response.text();
-      let data: { content?: string; zgHash?: string | null; zgError?: string | null } = {};
+      const responseText = await withWaitLogger(
+        {
+          file: 'altair_frontend1/src/components/Chat.tsx',
+          target: 'chat response.text()',
+          description: 'read chat response body',
+        },
+        () => response.text()
+      );
+      let data: { content?: string; zgHash?: string | null; zgError?: string | null; cid?: string | null } = {};
       try {
         data = JSON.parse(responseText) as { content?: string; zgHash?: string | null; zgError?: string | null };
       } catch (err) {
@@ -150,8 +291,13 @@ export default function Chat() {
         zgError: data?.zgError ?? null,
         hasContent: typeof data?.content === 'string',
       });
-      
-      const executionNote = await maybeExecuteSwapIntent(content);
+
+      const intent = extractSwapIntent(content);
+      if (intent && intent.type === 'SWAP_INTENT') {
+        await prefetchSolanaTokensForIntent(intent);
+      }
+
+      const executionNote = await maybeExecuteSwapIntent(content, data?.cid ?? null);
       if (executionNote) {
         console.log('[Swap Intent]', data.content);
       }
@@ -161,14 +307,15 @@ export default function Chat() {
           return [...prev, { role: 'assistant', content: executionNote }];
         }
 
-        return [
-          ...prev,
-            {
-              role: 'assistant',
-              content,
-              zgHash: data.zgHash,
-              zgError: data.zgError,
-            },
+          return [
+            ...prev,
+              {
+                role: 'assistant',
+                content,
+                zgHash: data.zgHash,
+                zgError: data.zgError,
+                cid: data?.cid ?? null,
+              },
         ];
       });
     } catch (error) {

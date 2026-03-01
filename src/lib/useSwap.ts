@@ -2,6 +2,7 @@
 
 import { usePrivy, useWallets } from '@privy-io/react-auth';
 import { ethers } from 'ethers';
+import { withWaitLogger } from './waitLogger';
 import { BLOCKCHAIN, CHAINS, WRAP_ETH, type ChainKey } from '@config/blockchain_config';
 import { BASE_MAINNET, BASE_SEPOLIA, ETH_MAINNET, ETH_SEPOLIA, resolveRpcUrls } from '@config/chain_info';
 import { WETH as BASE_WETH } from '@config/token_info/base_tokens';
@@ -23,6 +24,8 @@ const tokenConfigs = {
   BASE_MAINNET: { WETH: BASE_WETH },
 } as const;
 
+type EvmChainKey = Exclude<ChainKey, 'SOLANA_MAINNET'>;
+
 let swapQueue: Promise<void> = Promise.resolve();
 
 const withSwapQueue = async <T>(task: () => Promise<T>): Promise<T> => {
@@ -31,7 +34,7 @@ const withSwapQueue = async <T>(task: () => Promise<T>): Promise<T> => {
   return run;
 };
 
-const resolveSelectedChain = (explicitChain?: ChainKey) => {
+export const resolveSelectedChain = (explicitChain?: ChainKey) => {
   if (explicitChain) return explicitChain;
   if (typeof window === 'undefined') return BLOCKCHAIN;
   const stored = localStorage.getItem('selectedChain');
@@ -43,13 +46,16 @@ const ensureEvmChain = async (
   ethereumProvider: ethers.Eip1193Provider,
   chainKey: ChainKey,
 ) => {
-  const chainConfig = chainConfigs[chainKey];
+  if (chainKey === 'SOLANA_MAINNET') {
+    throw new Error('Solana is not supported by the EVM swap flow.');
+  }
+  const chainConfig = chainConfigs[chainKey as EvmChainKey];
   console.log('[RPC] ensureEvmChain chainKey:', chainKey);
   console.log('[RPC] ensureEvmChain rpcUrls:', chainConfig.rpcUrls);
   const resolvedRpcUrls = resolveRpcUrls(chainConfig.rpcUrls);
   console.log('[RPC] ensureEvmChain resolvedRpcUrls:', resolvedRpcUrls);
   const targetChainId = `0x${chainConfig.chainId.toString(16)}`;
-  const chainMeta: Record<ChainKey, { name: string; explorer: string }> = {
+  const chainMeta: Record<EvmChainKey, { name: string; explorer: string }> = {
     ETH_MAINNET: { name: 'Ethereum Mainnet', explorer: 'https://etherscan.io' },
     ETH_SEPOLIA: { name: 'Sepolia', explorer: 'https://sepolia.etherscan.io' },
     BASE_MAINNET: { name: 'Base Mainnet', explorer: 'https://basescan.org' },
@@ -74,10 +80,10 @@ const ensureEvmChain = async (
         params: [
           {
             chainId: targetChainId,
-            chainName: chainMeta[chainKey].name,
+            chainName: chainMeta[chainKey as EvmChainKey].name,
             nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 },
             rpcUrls: resolvedRpcUrls,
-            blockExplorerUrls: [chainMeta[chainKey].explorer],
+            blockExplorerUrls: [chainMeta[chainKey as EvmChainKey].explorer],
           },
         ],
       });
@@ -91,7 +97,7 @@ export const useSwap = (explicitChain?: ChainKey) => {
   const { authenticated } = usePrivy();
   const { wallets } = useWallets();
 
-  return async (sellToken: string, sellAmount: string, buyToken: string) =>
+  return async (sellToken: string, sellAmount: string, buyToken: string, CID?: string | null) =>
     withSwapQueue(async () => {
       if (!authenticated || !wallets?.length) {
         throw new Error('No authenticated wallet available.');
@@ -99,21 +105,53 @@ export const useSwap = (explicitChain?: ChainKey) => {
 
       const selectedChain = resolveSelectedChain(explicitChain);
       console.log('[RPC] selectedChain:', selectedChain);
-      const chainConfig = chainConfigs[selectedChain];
+      if (selectedChain === 'SOLANA_MAINNET') {
+        throw new Error('Solana is not supported by useSwap. Use useSolanaSwap instead.');
+      }
+      const evmChain = selectedChain as EvmChainKey;
+      const chainConfig = chainConfigs[evmChain];
       console.log('[RPC] chainConfig rpcUrls:', chainConfig?.rpcUrls);
-      const tokenConfig = tokenConfigs[selectedChain];
+      const tokenConfig = tokenConfigs[evmChain];
       if (!chainConfig) {
         throw new Error('Unsupported chain configuration.');
       }
 
       const wallet = wallets[0];
-      const ethereumProvider = await wallet.getEthereumProvider();
-      await ensureEvmChain(ethereumProvider, selectedChain);
+      const ethereumProvider = await withWaitLogger(
+        {
+          file: 'altair_frontend1/src/lib/useSwap.ts',
+          target: 'Privy wallet.getEthereumProvider',
+          description: 'EVM provider for swap',
+        },
+        () => wallet.getEthereumProvider()
+      );
+      await withWaitLogger(
+        {
+          file: 'altair_frontend1/src/lib/useSwap.ts',
+          target: 'wallet_switchEthereumChain',
+          description: `ensure chain ${selectedChain}`,
+        },
+        () => ensureEvmChain(ethereumProvider, selectedChain)
+      );
 
       const provider = new ethers.BrowserProvider(ethereumProvider);
-      const signer = await provider.getSigner();
+      const signer = await withWaitLogger(
+        {
+          file: 'altair_frontend1/src/lib/useSwap.ts',
+          target: 'ethers.getSigner',
+          description: 'EVM signer for swap',
+        },
+        () => provider.getSigner()
+      );
       const managedSigner = new ethers.NonceManager(signer);
-      const recipient = await managedSigner.getAddress();
+      const recipient = await withWaitLogger(
+        {
+          file: 'altair_frontend1/src/lib/useSwap.ts',
+          target: 'ethers.getAddress',
+          description: 'EVM recipient address',
+        },
+        () => managedSigner.getAddress()
+      );
 
       const normalizedSell = sellToken.toUpperCase();
       const normalizedBuy = buyToken.toUpperCase();
@@ -128,24 +166,47 @@ export const useSwap = (explicitChain?: ChainKey) => {
           managedSigner,
         );
 
-        const wrapTx = await weth.deposit({ value: amountWei });
-        await wrapTx.wait();
+        const wrapTx = await withWaitLogger(
+          {
+            file: 'altair_frontend1/src/lib/useSwap.ts',
+            target: 'WETH.deposit',
+            description: 'wrap ETH transaction submission',
+          },
+          () => weth.deposit({ value: amountWei })
+        );
+        await withWaitLogger(
+          {
+            file: 'altair_frontend1/src/lib/useSwap.ts',
+            target: 'WETH.deposit.wait',
+            description: 'wrap ETH confirmation',
+          },
+          () => wrapTx.wait()
+        );
 
         return wrapTx.hash as string;
       }
 
-      const routeResponse = await fetch('/api/test-swap', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          chain: selectedChain,
-          sellToken: effectiveSell,
-          buyToken: normalizedBuy,
-          amount: sellAmount,
-          recipient,
-        }),
-      });
+      const routeResponse = await withWaitLogger(
+        {
+          file: 'altair_frontend1/src/lib/useSwap.ts',
+          target: '/api/test-swap',
+          description: 'swap route response',
+        },
+        () =>
+          fetch('/api/test-swap', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({
+              chain: selectedChain,
+              sellToken: effectiveSell,
+              buyToken: normalizedBuy,
+              amount: sellAmount,
+              recipient,
+              CID: CID ?? null,
+            }),
+          })
+      );
 
       if (!routeResponse.ok) {
         const errorPayload = await routeResponse.json().catch(() => ({}));
@@ -172,18 +233,47 @@ export const useSwap = (explicitChain?: ChainKey) => {
           ['function approve(address,uint256)'],
           managedSigner,
         );
-        const approveTx = await erc20Approve.approve(routePayload.methodParameters.to, ethers.MaxUint256);
-        await approveTx.wait();
+        const approveTx = await withWaitLogger(
+          {
+            file: 'altair_frontend1/src/lib/useSwap.ts',
+            target: 'ERC20.approve',
+            description: 'token approval transaction submission',
+          },
+          () => erc20Approve.approve(routePayload.methodParameters.to, ethers.MaxUint256)
+        );
+        await withWaitLogger(
+          {
+            file: 'altair_frontend1/src/lib/useSwap.ts',
+            target: 'ERC20.approve.wait',
+            description: 'token approval confirmation',
+          },
+          () => approveTx.wait()
+        );
       }
 
-      const tx = await managedSigner.sendTransaction({
-        to: routePayload.methodParameters.to,
-        data: routePayload.methodParameters.calldata,
-        value: routePayload.methodParameters.value,
-        gasLimit: 1_000_000n,
-      });
+      const tx = await withWaitLogger(
+        {
+          file: 'altair_frontend1/src/lib/useSwap.ts',
+          target: 'sendTransaction',
+          description: 'swap transaction submission',
+        },
+        () =>
+          managedSigner.sendTransaction({
+            to: routePayload.methodParameters.to,
+            data: routePayload.methodParameters.calldata,
+            value: routePayload.methodParameters.value,
+            gasLimit: 1_000_000n,
+          })
+      );
 
-      await tx.wait();
+      await withWaitLogger(
+        {
+          file: 'altair_frontend1/src/lib/useSwap.ts',
+          target: 'sendTransaction.wait',
+          description: 'swap transaction confirmation',
+        },
+        () => tx.wait()
+      );
       if (typeof window !== 'undefined') {
         window.dispatchEvent(
           new CustomEvent('altair:swap-complete', {
