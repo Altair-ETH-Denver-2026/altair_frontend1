@@ -80,7 +80,7 @@ export default function Home() {
                 fontSize: `${TITLE_PANEL.size}rem`,
               }}
             >
-              {authenticated ? "Your crypto trading assistant." : "Your concierge for DeFi on Base."}
+              {authenticated ? "Your crypto trading assistant." : "Your crypto trading assistant."}
             </p>
           </div>
         </div>
