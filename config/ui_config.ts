@@ -3,7 +3,17 @@ export const LOGO_SPIN_MIN_MS = 400; // Min logo spin duration used by logo anim
 export const LOGO_SPIN_MAX_MS = 2000; // Max logo spin duration used by logo animation logic (see altair_frontend1/src/components/SpinningLogo.tsx)
 export const X_SIZE = 25; // Base close icon size referenced by panel close sizing conventions (see altair_frontend1/src/components/UserMenu.tsx)
 
+export const PANEL_DISPLAY = {
+  logo: {
+    size: 20,
+    paddingLeft: 3,
+    paddingTop: 1,
+    opacity: 75,
+  },
+};
+
 export const WALLET_DISPLAY = { // Wallet panel/dropdown sizing and typography config consumed in altair_frontend1/src/components/UserMenu.tsx
+  logo: true,
   options: ['panel', 'drop_down'] as const, // Allowed wallet UI modes read in UserMenu.tsx
   active: 'panel' as 'panel' | 'drop_down', // Active mode switch used in UserMenu.tsx
   width: 270, // Panel/dropdown width in UserMenu.tsx
@@ -133,6 +143,7 @@ export const WALLET_CHAIN_OPTIONS = [ // Wallet chain dropdown options in UserMe
 ] as const; // Preserve literal types for UserMenu.tsx type inference
 
 export const ADD_PANEL_DISPLAY = { // ADD_PANEL sizing, label, and icon styles in UserMenu.tsx
+  logo: false,
   width: 270, // ADD_PANEL width in UserMenu.tsx
   paddingLeft: 14, // ADD_PANEL left padding in UserMenu.tsx
   paddingRight: 8, // ADD_PANEL right padding in UserMenu.tsx
