@@ -77,6 +77,7 @@ export default function AddPanel({
     <Panel
       width={width}
       className="relative rounded-xl bg-gray-900 border border-gray-700 shadow-2xl overflow-visible flex flex-col"
+      panelType="add"
       onClose={onClose}
       closeLabel="Close wallet panel"
       closeClassName="absolute z-10 text-gray-400 hover:text-gray-200 cursor-pointer"
