@@ -1,10 +1,9 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
-import Image from 'next/image';
 import { SpinningLogo } from './SpinningLogo';
 import { ShieldCheck, Send, Loader2 } from 'lucide-react';
-import Logo from '../image/logo.png';
+import { useLogoAsset } from '../lib/logo';
 import { usePrivy } from '@privy-io/react-auth';
 import { withWaitLogger } from '../lib/waitLogger';
 import { useSwap } from '../lib/useSwap';
@@ -17,6 +16,8 @@ import { CHAT_PANEL } from '../../config/ui_config';
 interface Message {
   role: 'user' | 'assistant';
   content: string;
+  displayContent?: string;
+  isTyping?: boolean;
   zgHash?: string | null;
   zgError?: string | null;
   cid?: string | null;
@@ -53,6 +54,8 @@ export default function Chat() {
   const [isLoading, setIsLoading] = useState(false);
   const [isExecutingSwap, setIsExecutingSwap] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const typingSpeedMs = CHAT_PANEL.typingSpeedMs;
+  const logoAsset = useLogoAsset();
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -60,6 +63,31 @@ export default function Chat() {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages]);
+
+  useEffect(() => {
+    const pendingIndex = messages.findIndex((m) => m.role === 'assistant' && m.isTyping);
+    if (pendingIndex === -1) return;
+
+    const timer = setTimeout(() => {
+      setMessages((prev) => {
+        const next = [...prev];
+        const msg = next[pendingIndex];
+        if (!msg || msg.role !== 'assistant' || !msg.isTyping) return prev;
+
+        const current = msg.displayContent ?? '';
+        const nextChar = msg.content.charAt(current.length);
+        if (!nextChar) {
+          next[pendingIndex] = { ...msg, displayContent: msg.content, isTyping: false };
+          return next;
+        }
+
+        next[pendingIndex] = { ...msg, displayContent: current + nextChar };
+        return next;
+      });
+    }, typingSpeedMs);
+
+    return () => clearTimeout(timer);
+  }, [messages, typingSpeedMs]);
 
   const extractSwapIntent = (text: string): SwapIntent | null => {
     const trimmed = text.trim();
@@ -304,18 +332,25 @@ export default function Chat() {
 
       setMessages((prev) => {
         if (executionNote) {
-          return [...prev, { role: 'assistant', content: executionNote }];
-        }
-
+          const normalized = executionNote.replace(/^[\s\r\n]+/, '');
           return [
             ...prev,
-              {
-                role: 'assistant',
-                content,
-                zgHash: data.zgHash,
-                zgError: data.zgError,
-                cid: data?.cid ?? null,
-              },
+            { role: 'assistant', content: normalized, displayContent: '', isTyping: true },
+          ];
+        }
+
+        const normalized = content.replace(/^[\s\r\n]+/, '');
+        return [
+          ...prev,
+          {
+            role: 'assistant',
+            content: normalized,
+            displayContent: '',
+            isTyping: true,
+            zgHash: data.zgHash,
+            zgError: data.zgError,
+            cid: data?.cid ?? null,
+          },
         ];
       });
     } catch (error) {
@@ -350,17 +385,20 @@ export default function Chat() {
                   className="shrink-0 h-10 w-10 rounded-full bg-white/5 border flex items-center justify-center overflow-hidden"
                   style={{ borderColor: CHAT_PANEL.agent_icon_border_color }}
                 >
-                <SpinningLogo src={Logo} alt="Altair" className="h-9 w-9 object-contain" />
+                <SpinningLogo src={logoAsset} alt="Altair" className="h-9 w-9 object-contain" />
               </div>
-              <div className="flex flex-col items-start">
+              <div className="flex w-full flex-col items-start">
                 <div
-                  className="max-w-[85%] px-4 py-2 rounded-2xl text-sm whitespace-pre-wrap break-words"
+                  className="px-4 py-2 rounded-2xl text-sm whitespace-pre-wrap break-words"
                   style={{
                     backgroundColor: CHAT_PANEL.agent_chat_container_color,
                     color: CHAT_PANEL.agent_chat_text_color,
+                    width: CHAT_PANEL.agentChatWidth,
+                    overflowWrap: 'break-word',
+                    wordBreak: 'normal',
                   }}
                 >
-                  {m.content}
+                  {m.role === 'assistant' ? (m.displayContent ?? '') : m.content}
                 </div>
                 {m.zgHash && !m.zgError && (
                   <div className="flex items-center gap-2 mt-1">
@@ -384,10 +422,13 @@ export default function Chat() {
           ) : (
             <div key={i} className="flex flex-col items-end">
               <div
-                className="max-w-[85%] px-4 py-2 rounded-2xl text-sm whitespace-pre-wrap break-words"
+                className="px-4 py-2 rounded-2xl text-sm whitespace-pre-wrap break-words"
                 style={{
                   backgroundColor: CHAT_PANEL.user_chat_container_color,
                   color: CHAT_PANEL.user_chat_text_color,
+                  maxWidth: CHAT_PANEL.userChatMaxWidth,
+                  overflowWrap: 'break-word',
+                  wordBreak: 'normal',
                 }}
               >
                 {m.content}
@@ -398,7 +439,7 @@ export default function Chat() {
         {isLoading && (
           <div className="flex items-start gap-3">
             <div className="shrink-0 h-10 w-10 rounded-full bg-white/5 border border-gray-700 flex items-center justify-center overflow-hidden">
-              <SpinningLogo src={Logo} alt="Altair" className="h-9 w-9 object-contain" />
+              <SpinningLogo src={logoAsset} alt="Altair" className="h-9 w-9 object-contain" />
             </div>
             <div className="bg-gray-800 p-3 rounded-2xl animate-pulse">
               <Loader2 className="w-4 h-4 animate-spin text-gray-400" />

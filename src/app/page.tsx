@@ -6,13 +6,14 @@ import { usePrivy } from '@privy-io/react-auth';
 import { useUserSync } from '../lib/useUserSync';
 import UserMenu from '../components/UserMenu';
 import Chat from '../components/Chat';
-import Logo from '../image/logo.png';
 import { SpinningLogo } from '../components/SpinningLogo';
+import { useLogoAsset } from '../lib/logo';
 import { HOME_ICON, MENU_ICONS, TITLE_PANEL } from '../../config/ui_config';
 
 export default function Home() {
   const { login, authenticated } = usePrivy();
   useUserSync();
+  const logoAsset = useLogoAsset();
 
   return (
     <main className="relative min-h-screen w-full bg-black text-white flex flex-col items-center justify-center p-8">
@@ -29,7 +30,7 @@ export default function Home() {
         <Link href="/" className="flex items-center gap-3 hover:opacity-90 transition-opacity">
           <div style={{ height: `${HOME_ICON.size * 4}px` }}>
             <SpinningLogo
-              src={Logo}
+              src={logoAsset}
               alt="Altair logo"
               className="h-full w-auto"
               priority
@@ -60,7 +61,7 @@ export default function Home() {
           }}
         >
           <div style={{ height: `${TITLE_PANEL.logo_size * TITLE_PANEL.size * 4}px` }}>
-            <SpinningLogo src={Logo} alt="Altair logo" className="h-full w-auto" />
+            <SpinningLogo src={logoAsset} alt="Altair logo" className="h-full w-auto" />
           </div>
           <div className="text-left">
             <h1
