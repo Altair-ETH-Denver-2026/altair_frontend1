@@ -6,8 +6,13 @@ import { usePrivy, useWallets } from '@privy-io/react-auth';
 import { useWallets as useSolanaWallets, useSignAndSendTransaction } from '@privy-io/react-auth/solana';
 import { useSwap } from '../lib/useSwap';
 import { useSolanaSwap } from '../lib/useSolanaSwap';
+import { useSolanaTransfer } from '../lib/useSolanaTransfer';
 import { withWaitLogger } from '../lib/waitLogger';
+import { usePanels } from '../lib/usePanels';
+import { PublicKey } from '@solana/web3.js';
 import { UserRound, LogOut, Settings, Wallet, Wrench, Copy, Globe2, Check } from 'lucide-react';
+import WalletPanel from './panels/WalletPanel';
+import AddPanel from './panels/AddPanel';
 import { useEffect as useClientEffect, useState as useClientState } from 'react';
 import { BLOCKCHAIN, CHAINS, GAS_RESERVES, GAS_TOKENS, type ChainKey } from '../../config/blockchain_config';
 import { BASE_MAINNET, BASE_SEPOLIA, ETH_MAINNET, ETH_SEPOLIA, SOLANA_MAINNET, resolveRpcUrls } from '../../config/chain_info';
@@ -27,8 +32,25 @@ export default function UserMenu() {
   const cachedSolKey = 'cached:solAddress';
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isWalletOpen, setIsWalletOpen] = useState(false);
-  const [isWalletPanelOpen, setIsWalletPanelOpen] = useState(false);
-  const [isAddPanelOpen, setIsAddPanelOpen] = useState(true);
+  const [selectedChain, setSelectedChain] = useState<ChainKey>(BLOCKCHAIN);
+  const {
+    walletPanels,
+    setWalletPanels,
+    isWalletPanelOpen,
+    setIsWalletPanelOpen,
+    isAddPanelOpen,
+    setIsAddPanelOpen,
+    isAddPanelChainOpen,
+    setIsAddPanelChainOpen,
+    addPanelChain,
+    setAddPanelChain,
+    setAddPanelHasCustomChain,
+    addPanelIconHovered: isAddPanelIconHovered,
+    setAddPanelIconHovered,
+    initWalletPanels,
+    closeWalletPanel,
+    addWalletPanel,
+  } = usePanels({ initialChain: selectedChain });
   const [isDevOpen, setIsDevOpen] = useState(false);
   const [isSwapping, setIsSwapping] = useState(false);
   const [swapMessage, setSwapMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -60,21 +82,19 @@ export default function UserMenu() {
   const [solanaAddress, setSolanaAddress] = useClientState<string>('');
   const [isNetworkOpen, setIsNetworkOpen] = useState(false);
   const [isWalletDropdownChainOpen, setIsWalletDropdownChainOpen] = useState(false);
-  const [isAddPanelChainOpen, setIsAddPanelChainOpen] = useState(false);
-  const [isAddPanelIconHovered, setIsAddPanelIconHovered] = useState(false);
   const [walletDropdownChain, setWalletDropdownChain] = useState<ChainKey | 'ALL'>('ALL');
-  const [addPanelChain, setAddPanelChain] = useState<ChainKey | 'ALL'>('ALL');
-  const [walletPanels, setWalletPanels] = useState<
-    Array<{ id: number; chainKey: ChainKey | 'ALL'; isChainOpen: boolean }>
-  >([]);
-  const walletPanelIdRef = useRef(0);
   const [walletDropdownHasCustomChain, setWalletDropdownHasCustomChain] = useState(false);
-  const [walletPanelHasCustomChain, setWalletPanelHasCustomChain] = useState(false);
-  const [addPanelHasCustomChain, setAddPanelHasCustomChain] = useState(false);
-  const [selectedChain, setSelectedChain] = useState<ChainKey>(BLOCKCHAIN);
   const [withdrawPanels, setWithdrawPanels] = useState<Record<number, { active: boolean; token: string; amount: string; address: string }>>({});
+  const [withdrawReceipt, setWithdrawReceipt] = useState<Record<number, { active: boolean; status?: 'submitted' | 'executed'; txHash?: string | null }>>({});
+  const [withdrawErrors, setWithdrawErrors] = useState<Record<number, string | null>>({});
+  const [withdrawSubmittedDots, setWithdrawSubmittedDots] = useState<Record<number, number>>({});
+  const [tokenDropdownOpen, setTokenDropdownOpen] = useState<Record<number, boolean>>({});
+  const [tokenDropdownForceAll, setTokenDropdownForceAll] = useState<Record<number, boolean>>({});
+  const [walletAddressCopyState, setWalletAddressCopyState] = useState<Record<string, boolean>>({});
+  const walletAddressCopyTimers = useRef<Record<string, ReturnType<typeof setTimeout> | null>>({});
   const executeSwap = useSwap(selectedChain);
   const executeSolanaSwap = useSolanaSwap(selectedChain);
+  const executeSolanaTransfer = useSolanaTransfer(selectedChain);
   const menuRef = useRef<HTMLDivElement>(null);
   const isWalletDropDown = WALLET_DISPLAY.active === 'drop_down';
   const isWalletPanel = WALLET_DISPLAY.active === 'panel';
@@ -85,6 +105,12 @@ export default function UserMenu() {
   const buttonPaddingX = WALLET_DISPLAY.buttonWidth * buttonSize;
   const buttonHeight = WALLET_DISPLAY.buttonHeight * buttonSize;
   const buttonFontSize = 14 * buttonSize;
+  const topRowButtonColor = WALLET_DISPLAY.buttonColor ?? 'rgba(31, 41, 55, 0.6)';
+  const topRowButtonBorderColor = WALLET_DISPLAY.buttonBorderColor ?? '#374151';
+  const topRowButtonHighlightColor = WALLET_DISPLAY.buttonHighlightColor ?? '#1f2937';
+  const topRowButtonHighlightBorderColor = WALLET_DISPLAY.buttonHighlightBorderColor ?? topRowButtonBorderColor;
+  const topRowButtonActiveColor = WALLET_DISPLAY.buttonActiveColor ?? 'rgba(59, 130, 246, 0.2)';
+  const topRowButtonActiveBorderColor = WALLET_DISPLAY.buttonActiveBorderColor ?? '#60a5fa';
   const containerPaddingLeft = WALLET_DISPLAY.paddingLeft * buttonSize;
   const containerPaddingRight = WALLET_DISPLAY.paddingRight * buttonSize;
   const tokenRowConfig = WALLET_DISPLAY.rows;
@@ -113,6 +139,14 @@ export default function UserMenu() {
   const chainDropdownConfig = WALLET_DISPLAY.chainDropdown;
   const chainDropdownWidth = chainDropdownConfig.width * buttonSize;
   const chainDropdownFontSize = chainDropdownConfig.fontSize * buttonSize;
+  const tokenDropdownConfig = WALLET_DISPLAY.tokenDropdown ?? { width: chainDropdownWidth, fontSize: 12, fontName: 'sans-serif' };
+  const tokenDropdownWidthRaw = tokenDropdownConfig.width ?? chainDropdownWidth;
+  const tokenDropdownWidthValue = tokenDropdownWidthRaw ? tokenDropdownWidthRaw : '100%';
+  const tokenDropdownWidth = typeof tokenDropdownWidthValue === 'number'
+    ? tokenDropdownWidthValue * buttonSize
+    : tokenDropdownWidthValue;
+  const tokenDropdownFontSize = Number(tokenDropdownConfig.fontSize) * buttonSize;
+  const tokenDropdownFontFamily = tokenDropdownConfig.fontName;
   const withdrawSymbolInputConfig = WALLET_DISPLAY.withdraw?.symbolInput ?? { paddingLeft: buttonPaddingX, paddingRight: buttonPaddingX };
   const withdrawSymbolPaddingLeft = withdrawSymbolInputConfig.paddingLeft * buttonSize;
   const withdrawSymbolPaddingRight = withdrawSymbolInputConfig.paddingRight * buttonSize;
@@ -142,6 +176,16 @@ export default function UserMenu() {
   const withdrawCancelButtonConfig = WALLET_DISPLAY.withdraw?.cancelButton ?? { textColor: '#f3f4f6', borderColor: '#f3f4f6', buttonColor: '#c74848', borderWidth: 1 };
   const withdrawSubmitBorderWidth = Number(withdrawSubmitButtonConfig.borderWidth) * buttonSize;
   const withdrawCancelBorderWidth = Number(withdrawCancelButtonConfig.borderWidth) * buttonSize;
+  const withdrawSubmitHighlightColor = withdrawSubmitButtonConfig.highlightColor ?? withdrawSubmitButtonConfig.buttonColor;
+  const withdrawSubmitActiveColor = withdrawSubmitButtonConfig.activeColor ?? withdrawSubmitButtonConfig.buttonColor;
+  const withdrawSubmitActiveBorderColor = withdrawSubmitButtonConfig.activeBorderColor ?? withdrawSubmitButtonConfig.borderColor;
+  const withdrawCancelHighlightColor = withdrawCancelButtonConfig.highlightColor ?? withdrawCancelButtonConfig.buttonColor;
+  const withdrawCancelActiveColor = withdrawCancelButtonConfig.activeColor ?? withdrawCancelButtonConfig.buttonColor;
+  const withdrawCancelActiveBorderColor = withdrawCancelButtonConfig.activeBorderColor ?? withdrawCancelButtonConfig.borderColor;
+  const walletAddressCopyDurationMs = Math.max(
+    0,
+    Number(WALLET_DISPLAY.walletAddressButton?.activeDuration ?? 0) * 1000
+  );
   const [isMaxHovering, setIsMaxHovering] = useState(false);
   const addPanelIconButtons = ADD_PANEL_DISPLAY.iconButtons;
   const addPanelButtonSize = addPanelIconButtons.size;
@@ -175,6 +219,31 @@ export default function UserMenu() {
   };
   const balanceCacheTtlMs = 30_000;
   const inFlightBalanceKey = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (Object.keys(withdrawReceipt).length === 0) return;
+    const timer = setInterval(() => {
+      setWithdrawSubmittedDots((prev) => {
+        let updated = false;
+        const next: Record<number, number> = { ...prev };
+        Object.entries(withdrawReceipt).forEach(([key, receipt]) => {
+          const panelId = Number(key);
+          if (!receipt?.active || receipt.status !== 'submitted') {
+            if (next[panelId] !== undefined) {
+              delete next[panelId];
+              updated = true;
+            }
+            return;
+          }
+          const current = next[panelId] ?? 0;
+          next[panelId] = (current + 1) % 4;
+          updated = true;
+        });
+        return updated ? next : prev;
+      });
+    }, 500);
+    return () => clearInterval(timer);
+  }, [withdrawReceipt]);
 
   const applyBalanceSnapshot = (
     chainKey: ChainKey,
@@ -351,7 +420,7 @@ export default function UserMenu() {
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+  }, [setIsAddPanelChainOpen, setWalletPanels, setSelectedChain]);
 
   useClientEffect(() => {
     const controller = new AbortController();
@@ -537,14 +606,124 @@ export default function UserMenu() {
         : ['ETH', 'USDC', 'WETH', 'DAI'];
   const resolveWithdrawState = (panelId: number) =>
     withdrawPanels[panelId] ?? { active: false, token: '', amount: '', address: '' };
-  const toggleWithdrawPanel = (panelId: number) => {
+  const resolveWithdrawReceipt = (panelId: number) =>
+    withdrawReceipt[panelId] ?? { active: false, status: undefined, txHash: null };
+  const resolveWithdrawError = (panelId: number) => withdrawErrors[panelId] ?? null;
+  const resolveWithdrawDots = (panelId: number) => withdrawSubmittedDots[panelId] ?? 0;
+  const clearWithdrawError = (panelId: number) => {
+    setWithdrawErrors((prev) => {
+      if (!prev[panelId]) return prev;
+      const { [panelId]: _removed, ...rest } = prev;
+      return rest;
+    });
+  };
+  const clearWithdrawReceipt = (panelId: number) => {
+    setWithdrawReceipt((prev) => {
+      if (!prev[panelId]) return prev;
+      const { [panelId]: _removed, ...rest } = prev;
+      return rest;
+    });
+    setWithdrawSubmittedDots((prev) => {
+      if (!prev[panelId]) return prev;
+      const { [panelId]: _removed, ...rest } = prev;
+      return rest;
+    });
+  };
+  const isValidWithdrawToken = (chainKey: ChainKey | 'ALL', token: string) => {
+    if (chainKey === 'ALL') return false;
+    const normalized = token.trim().toUpperCase();
+    if (!normalized) return false;
+    return resolveTokenRows(chainKey).includes(normalized);
+  };
+  const isValidRecipientAddress = (chainKey: ChainKey | 'ALL', address: string) => {
+    const trimmed = address.trim();
+    if (!trimmed || chainKey === 'ALL') return false;
+    if (chainKey === 'SOLANA_MAINNET') {
+      try {
+        const pubkey = new PublicKey(trimmed);
+        return PublicKey.isOnCurve(pubkey.toBuffer());
+      } catch {
+        return false;
+      }
+    }
+    return ethers.isAddress(trimmed);
+  };
+  const isValidWithdrawAmount = (chainKey: ChainKey | 'ALL', token: string, amount: string) => {
+    const trimmed = amount.trim();
+    if (!trimmed) return false;
+    const amountNumber = Number(trimmed);
+    if (!Number.isFinite(amountNumber) || amountNumber <= 0) return false;
+    if (chainKey === 'ALL') return false;
+    const normalizedToken = token.trim().toUpperCase();
+    if (!normalizedToken) return false;
+    const balanceValue = resolveBalanceForSymbol(chainKey, normalizedToken);
+    const balanceNumber = Number(balanceValue);
+    if (!Number.isFinite(balanceNumber)) return false;
+    return amountNumber <= balanceNumber;
+  };
+  const resolveTokenDropdownOpen = (panelId: number) => Boolean(tokenDropdownOpen[panelId]);
+  const resolveTokenDropdownForceAll = (panelId: number) => Boolean(tokenDropdownForceAll[panelId]);
+  const resolveWalletCopyActive = (key: string) => Boolean(walletAddressCopyState[key]);
+  const triggerWalletCopyState = (key: string) => {
+    setWalletAddressCopyState((prev) => ({ ...prev, [key]: true }));
+    const existing = walletAddressCopyTimers.current[key];
+    if (existing) {
+      clearTimeout(existing);
+    }
+    if (walletAddressCopyDurationMs > 0) {
+      walletAddressCopyTimers.current[key] = setTimeout(() => {
+        setWalletAddressCopyState((prev) => {
+          if (!prev[key]) return prev;
+          const { [key]: _removed, ...rest } = prev;
+          return rest;
+        });
+      }, walletAddressCopyDurationMs);
+    }
+  };
+  const toggleWithdrawPanel = (panelId: number, options?: { clearOnClose?: boolean }) => {
     setWithdrawPanels((prev) => {
       const current = prev[panelId] ?? { active: false, token: '', amount: '', address: '' };
+      const nextActive = !current.active;
+      if (!nextActive && options?.clearOnClose) {
+        const { [panelId]: _removed, ...rest } = prev;
+        return rest;
+      }
       return {
         ...prev,
-        [panelId]: { ...current, active: !current.active },
+        [panelId]: { ...current, active: nextActive },
       };
     });
+    setTokenDropdownOpen((prev) => {
+      if (!prev[panelId]) return prev;
+      const { [panelId]: _removed, ...rest } = prev;
+      return rest;
+    });
+    setTokenDropdownForceAll((prev) => {
+      if (!prev[panelId]) return prev;
+      const { [panelId]: _removed, ...rest } = prev;
+      return rest;
+    });
+    setWithdrawReceipt((prev) => {
+      const current = prev[panelId] ?? { active: false, txHash: null };
+      if (current.active) {
+        const { [panelId]: _removed, ...rest } = prev;
+        return rest;
+      }
+      return prev;
+    });
+    clearWithdrawReceipt(panelId);
+    setWithdrawSubmittedDots((prev) => {
+      if (!prev[panelId]) return prev;
+      const { [panelId]: _removed, ...rest } = prev;
+      return rest;
+    });
+    if (options?.clearOnClose) {
+      setWithdrawErrors((prev) => {
+        if (!prev[panelId]) return prev;
+        const { [panelId]: _removed, ...rest } = prev;
+        return rest;
+      });
+    }
   };
   const updateWithdrawToken = (panelId: number, token: string) => {
     setWithdrawPanels((prev) => {
@@ -554,6 +733,16 @@ export default function UserMenu() {
         [panelId]: { ...current, token },
       };
     });
+    if (resolveWithdrawError(panelId) === 'Invalid token') {
+      const chainKey = (walletPanels.find((panel) => panel.id === panelId)?.chainKey ?? 'ALL') as ChainKey | 'ALL';
+      if (isValidWithdrawToken(chainKey, token)) {
+        clearWithdrawError(panelId);
+      }
+      return;
+    }
+    if (resolveWithdrawError(panelId) === 'No token selected' && token.trim()) {
+      clearWithdrawError(panelId);
+    }
   };
   const updateWithdrawAmount = (panelId: number, amount: string) => {
     setWithdrawPanels((prev) => {
@@ -563,6 +752,16 @@ export default function UserMenu() {
         [panelId]: { ...current, amount },
       };
     });
+    const existing = resolveWithdrawError(panelId);
+    if (existing === 'No token amount' && amount.trim()) {
+      clearWithdrawError(panelId);
+    } else if (existing && existing.startsWith('Insufficient ') && existing.endsWith(' in Wallet')) {
+      const chainKey = (walletPanels.find((panel) => panel.id === panelId)?.chainKey ?? 'ALL') as ChainKey | 'ALL';
+      const token = resolveWithdrawState(panelId).token;
+      if (isValidWithdrawAmount(chainKey, token, amount)) {
+        clearWithdrawError(panelId);
+      }
+    }
   };
   const updateWithdrawAddress = (panelId: number, address: string) => {
     setWithdrawPanels((prev) => {
@@ -572,6 +771,17 @@ export default function UserMenu() {
         [panelId]: { ...current, address },
       };
     });
+    const existing = resolveWithdrawError(panelId);
+    if (existing === 'No recipient address' && address.trim()) {
+      clearWithdrawError(panelId);
+      return;
+    }
+    if (existing === 'Invalid recipient address') {
+      const chainKey = (walletPanels.find((panel) => panel.id === panelId)?.chainKey ?? 'ALL') as ChainKey | 'ALL';
+      if (isValidRecipientAddress(chainKey, address)) {
+        clearWithdrawError(panelId);
+      }
+    }
   };
   const renderBalances = (chainKey: ChainKey | 'ALL') => {
     const chainSnapshot = chainKey === 'ALL' ? null : balancesByChain[chainKey as ChainKey];
@@ -636,537 +846,348 @@ export default function UserMenu() {
       );
     });
   };
-  const renderWalletPanelInstance = (
-    panel: { id: number; chainKey: ChainKey | 'ALL'; isChainOpen: boolean },
-    options?: {
-      hideClose?: boolean;
-      onClose?: () => void;
-    },
-  ) => (
-    <div
-      className="relative rounded-xl bg-gray-900 border border-gray-700 shadow-2xl overflow-visible flex flex-col"
-      style={{ width: `${walletWidth}px` }}
-    >
-      {!options?.hideClose ? (
-        <button
-          type="button"
-          onClick={options?.onClose ?? (() => {
-            setWalletPanels((current) => {
-              const next = current.filter((entry) => entry.id !== panel.id);
-              if (next.length === 0) {
-                setIsWalletPanelOpen(false);
-              }
-              return next;
-            });
-            setWithdrawPanels((prev) => {
+  const handleMaxClick = (panelId: number) => {
+    const selectedToken = resolveWithdrawState(panelId).token;
+    const hasSelectedToken = Boolean(selectedToken && selectedToken.trim());
+    if (!hasSelectedToken) return;
+    const normalizedToken = selectedToken.trim().toUpperCase();
+    const chainKey = (walletPanels.find((panel) => panel.id === panelId)?.chainKey ?? 'ALL') as ChainKey | 'ALL';
+    const chainKeyNormalized = chainKey === 'ALL' ? null : chainKey;
+    const gasToken = chainKeyNormalized ? GAS_TOKENS[chainKeyNormalized] : null;
+    const reserve = chainKeyNormalized ? Number(GAS_RESERVES[chainKeyNormalized] ?? 0) : 0;
+    const balanceValue = resolveBalanceForSymbol(chainKey, normalizedToken);
+    const balanceNumber = Number(balanceValue);
+    const isGasToken = gasToken && normalizedToken === gasToken;
+    const effective = isGasToken && Number.isFinite(balanceNumber)
+      ? Math.max(0, balanceNumber - reserve)
+      : balanceValue;
+    updateWithdrawAmount(panelId, effective.toString());
+  };
+
+  const resolveTxUrl = (panelId: number, chainKey: ChainKey | 'ALL') => {
+    const txHash = resolveWithdrawReceipt(panelId).txHash;
+    if (!txHash) return '#';
+    if (isSolanaChain(chainKey)) return `https://solscan.io/tx/${txHash}`;
+    if (chainKey === 'ETH_MAINNET') return `https://etherscan.io/tx/${txHash}`;
+    if (chainKey === 'ETH_SEPOLIA') return `https://sepolia.etherscan.io/tx/${txHash}`;
+    if (chainKey === 'BASE_MAINNET') return `https://basescan.org/tx/${txHash}`;
+    if (chainKey === 'BASE_SEPOLIA') return `https://sepolia.basescan.org/tx/${txHash}`;
+    return '#';
+  };
+
+  const renderWalletPanel = (panel: { id: number; chainKey: ChainKey | 'ALL'; isChainOpen: boolean }) => (
+    <WalletPanel
+      panel={panel}
+      walletWidth={walletWidth}
+      closePaddingTop={closePaddingTop}
+      closePaddingRight={closePaddingRight}
+      closeSize={closeSize}
+      closeFontFamily={closeFontFamily}
+      titlePaddingTop={titlePaddingTop}
+      titlePaddingBottom={titlePaddingBottom}
+      containerPaddingLeft={containerPaddingLeft}
+      containerPaddingRight={containerPaddingRight}
+      titleFontSize={titleFontSize}
+      titleFontFamily={titleFontFamily}
+      chainDropdownFontSize={chainDropdownFontSize}
+      chainDropdownWidth={chainDropdownWidth}
+      walletChainOptions={walletChainOptions}
+      resolveWalletTitle={resolveWalletTitle}
+      onToggleChainOpen={(panelId) => {
+        setWalletPanels((current) =>
+          current.map((entry) =>
+            entry.id === panelId ? { ...entry, isChainOpen: !entry.isChainOpen } : entry,
+          ),
+        );
+      }}
+      onSelectChain={(panelId, chainKey) => {
+        setWalletPanels((current) =>
+          current.map((entry) =>
+            entry.id === panelId
+              ? { ...entry, chainKey, isChainOpen: false }
+              : entry,
+          ),
+        );
+        if (chainKey !== 'ALL') {
+          void fetchBalancesForChain(chainKey, { forceRefresh: true });
+        }
+      }}
+      buttonHeight={buttonHeight}
+      buttonPaddingX={buttonPaddingX}
+      buttonFontSize={buttonFontSize}
+      topRowButtonColor={topRowButtonColor}
+      topRowButtonBorderColor={topRowButtonBorderColor}
+      topRowButtonHighlightColor={topRowButtonHighlightColor}
+      topRowButtonHighlightBorderColor={topRowButtonHighlightBorderColor}
+      topRowButtonActiveColor={topRowButtonActiveColor}
+      topRowButtonActiveBorderColor={topRowButtonActiveBorderColor}
+      withdrawSymbolPaddingLeft={withdrawSymbolPaddingLeft}
+      withdrawSymbolPaddingRight={withdrawSymbolPaddingRight}
+      tokenDropdownWidth={tokenDropdownWidth}
+      tokenDropdownFontSize={tokenDropdownFontSize}
+      tokenDropdownFontFamily={tokenDropdownFontFamily}
+      withdrawAmountInputPaddingLeft={withdrawAmountInputPaddingLeft}
+      withdrawAmountInputPaddingRight={withdrawAmountInputPaddingRight}
+      withdrawAmountInputFontSize={withdrawAmountInputFontSize}
+      withdrawAmountInputColor={withdrawAmountInputColor}
+      withdrawMaxFontSize={withdrawMaxFontSize}
+      withdrawMaxColor={withdrawMaxColor}
+      withdrawMaxHighlightColor={withdrawMaxHighlightColor}
+      withdrawMaxInactiveColor={withdrawMaxInactiveColor}
+      withdrawDollarValueFontSize={withdrawDollarValueFontSize}
+      withdrawDollarValueFontFamily={withdrawDollarValueFontFamily}
+      withdrawDollarValueColor={withdrawDollarValueColor}
+      withdrawDollarValueWidth={withdrawDollarValueWidth}
+      withdrawDollarValuePaddingLeft={withdrawDollarValuePaddingLeft}
+      withdrawDollarValuePaddingRight={withdrawDollarValuePaddingRight}
+      withdrawAddressInputPaddingLeft={withdrawAddressInputPaddingLeft}
+      withdrawAddressInputPaddingRight={withdrawAddressInputPaddingRight}
+      withdrawAddressInputFontSize={withdrawAddressInputFontSize}
+      withdrawAddressInputColor={withdrawAddressInputColor}
+      withdrawSubmitButtonConfig={withdrawSubmitButtonConfig}
+      withdrawCancelButtonConfig={withdrawCancelButtonConfig}
+      withdrawSubmitBorderWidth={withdrawSubmitBorderWidth}
+      withdrawCancelBorderWidth={withdrawCancelBorderWidth}
+      withdrawSubmitHighlightColor={withdrawSubmitHighlightColor}
+      withdrawSubmitActiveColor={withdrawSubmitActiveColor}
+      withdrawSubmitActiveBorderColor={withdrawSubmitActiveBorderColor}
+      withdrawCancelHighlightColor={withdrawCancelHighlightColor}
+      withdrawCancelActiveColor={withdrawCancelActiveColor}
+      withdrawCancelActiveBorderColor={withdrawCancelActiveBorderColor}
+      resolveTokenRows={resolveTokenRows}
+      resolveWithdrawState={resolveWithdrawState}
+      resolveWithdrawReceipt={resolveWithdrawReceipt}
+      resolveWithdrawError={resolveWithdrawError}
+      resolveWithdrawDots={resolveWithdrawDots}
+      resolveTokenDropdownOpen={resolveTokenDropdownOpen}
+      resolveTokenDropdownForceAll={resolveTokenDropdownForceAll}
+      resolveWalletCopyActive={resolveWalletCopyActive}
+      resolveWalletAddress={resolveWalletAddress}
+      formatDisplayAddress={formatDisplayAddress}
+      triggerWalletCopyState={triggerWalletCopyState}
+      toggleWithdrawPanel={toggleWithdrawPanel}
+      updateWithdrawToken={updateWithdrawToken}
+      updateWithdrawAmount={updateWithdrawAmount}
+      updateWithdrawAddress={updateWithdrawAddress}
+      setTokenDropdownOpen={setTokenDropdownOpen}
+      setTokenDropdownForceAll={setTokenDropdownForceAll}
+      isMaxHovering={isMaxHovering}
+      setIsMaxHovering={setIsMaxHovering}
+      onMaxClick={handleMaxClick}
+      resolveTxUrl={resolveTxUrl}
+      onClose={() => {
+        closeWalletPanel(panel.id, () => {
+          setIsWalletPanelOpen(false);
+        });
+        setWithdrawPanels((prev) => {
+          if (!prev[panel.id]) return prev;
+          const { [panel.id]: _removed, ...rest } = prev;
+          return rest;
+        });
+        setWithdrawReceipt((prev) => {
+          if (!prev[panel.id]) return prev;
+          const { [panel.id]: _removed, ...rest } = prev;
+          return rest;
+        });
+        setWithdrawErrors((prev) => {
+          if (!prev[panel.id]) return prev;
+          const { [panel.id]: _removed, ...rest } = prev;
+          return rest;
+        });
+        setTokenDropdownOpen((prev) => {
+          if (!prev[panel.id]) return prev;
+          const { [panel.id]: _removed, ...rest } = prev;
+          return rest;
+        });
+        setTokenDropdownForceAll((prev) => {
+          if (!prev[panel.id]) return prev;
+          const { [panel.id]: _removed, ...rest } = prev;
+          return rest;
+        });
+        setWalletAddressCopyState((prev) => {
+          const key = `panel-${panel.id}`;
+          if (!prev[key]) return prev;
+          const { [key]: _removed, ...rest } = prev;
+          return rest;
+        });
+      }}
+      onSubmitWithdraw={() => {
+        console.log('[UserMenu] "Submit Withdrawal" clicked');
+        const state = resolveWithdrawState(panel.id);
+        console.log('[UserMenu] "State resolved, state:', state);
+        const token = state.token?.trim();
+        console.log('[UserMenu] token (state.token):', state.token);
+        const amount = state.amount?.trim();
+        console.log('[UserMenu] amount (state.amount):', state.amount);
+        const address = state.address?.trim();
+        console.log('[UserMenu] address (state.address):', state.address);
+        const chainKey = panel.chainKey as ChainKey;
+        const tokenOptions = resolveTokenRows(chainKey);
+        if (!token) {
+          clearWithdrawReceipt(panel.id);
+          setWithdrawErrors((prev) => ({ ...prev, [panel.id]: 'No token selected' }));
+          return;
+        }
+        const normalizedToken = token.toUpperCase();
+        if (!tokenOptions.includes(normalizedToken)) {
+          clearWithdrawReceipt(panel.id);
+          setWithdrawErrors((prev) => ({ ...prev, [panel.id]: 'Invalid token' }));
+          return;
+        }
+        if (!amount) {
+          clearWithdrawReceipt(panel.id);
+          setWithdrawErrors((prev) => ({ ...prev, [panel.id]: 'No token amount' }));
+          return;
+        }
+        const amountNumber = Number(amount);
+        console.log('[UserMenu] amount:', amountNumber);
+        if (!isValidWithdrawAmount(chainKey, token, amount)) {
+          const tokenLabel = token.trim().toUpperCase() || 'TOKEN';
+          clearWithdrawReceipt(panel.id);
+          setWithdrawErrors((prev) => ({
+            ...prev,
+            [panel.id]: `Insufficient ${tokenLabel} in Wallet`,
+          }));
+          return;
+        }
+        const gasToken = GAS_TOKENS[chainKey] ?? null;
+        if (gasToken) {
+          console.log('[UserMenu] gasToken', gasToken);
+          const reserve = Number(GAS_RESERVES[chainKey] ?? 0);
+          console.log('[UserMenu] reserve', reserve);
+          const gasBalanceValue = resolveBalanceForSymbol(chainKey, gasToken);
+          console.log('[UserMenu] gasBalanceValue', gasBalanceValue);
+          const gasBalanceNumber = Number(gasBalanceValue);
+          console.log('[UserMenu] gasBalanceNumber', gasBalanceNumber);
+          const gasEffective = Number.isFinite(gasBalanceNumber)
+            ? Math.max(0, gasBalanceNumber - reserve)
+            : Number.NaN;
+          console.log('[UserMenu] gasEffective', gasEffective);
+          const isGasToken = normalizedToken === gasToken;
+          if (!Number.isFinite(gasEffective) || gasEffective <= 0) {
+            clearWithdrawReceipt(panel.id);
+            setWithdrawErrors((prev) => ({
+              ...prev,
+              [panel.id]: chainKey === 'SOLANA_MAINNET'
+                ? 'Insufficient SOL to pay gas fee'
+                : 'Insufficient ETH to pay gas fee',
+            }));
+            return;
+          }
+          if (isGasToken && amountNumber > gasEffective) {
+            clearWithdrawReceipt(panel.id);
+            setWithdrawErrors((prev) => ({
+              ...prev,
+              [panel.id]: chainKey === 'SOLANA_MAINNET'
+                ? 'Insufficient SOL to pay gas fee'
+                : 'Insufficient ETH to pay gas fee',
+            }));
+            return;
+          }
+        }
+        if (!address) {
+          clearWithdrawReceipt(panel.id);
+          setWithdrawErrors((prev) => ({ ...prev, [panel.id]: 'No recipient address' }));
+          return;
+        }
+        if (chainKey === 'SOLANA_MAINNET') {
+          try {
+            new PublicKey(address);
+          } catch {
+            clearWithdrawReceipt(panel.id);
+            setWithdrawErrors((prev) => ({ ...prev, [panel.id]: 'Invalid recipient address' }));
+            return;
+          }
+        } else if (!ethers.isAddress(address)) {
+          clearWithdrawReceipt(panel.id);
+          setWithdrawErrors((prev) => ({ ...prev, [panel.id]: 'Invalid recipient address' }));
+          return;
+        }
+        if (panel.chainKey === 'ALL') return;
+        console.log('[UserMenu] chainKey:', chainKey);
+        setWithdrawErrors((prev) => {
+          if (!prev[panel.id]) return prev;
+          const { [panel.id]: _removed, ...rest } = prev;
+          return rest;
+        });
+        setWithdrawReceipt((prev) => ({
+          ...prev,
+          [panel.id]: { active: true, status: 'submitted', txHash: null },
+        }));
+        setWithdrawSubmittedDots((prev) => ({ ...prev, [panel.id]: 0 }));
+        const run = async () => {
+          if (isSolanaChain(chainKey)) {
+            const txHash = await executeSolanaTransfer(token, amount, address);
+            setWithdrawReceipt((prev) => ({
+              ...prev,
+              [panel.id]: { active: true, status: 'executed', txHash },
+            }));
+            setWithdrawSubmittedDots((prev) => {
               if (!prev[panel.id]) return prev;
               const { [panel.id]: _removed, ...rest } = prev;
               return rest;
             });
-          })}
-          aria-label="Close wallet panel"
-          className="absolute z-10 text-gray-400 hover:text-gray-200 cursor-pointer"
-          style={{
-            top: `${closePaddingTop}px`,
-            right: `${closePaddingRight}px`,
-            fontSize: `${closeSize}px`,
-            fontFamily: closeFontFamily,
-            lineHeight: 1,
-          }}
-        >
-          ×
-        </button>
-      ) : null}
-      <div
-        className="relative flex items-center justify-center pointer-events-none"
-        style={{
-          paddingTop: `${titlePaddingTop}px`,
-          paddingBottom: `${titlePaddingBottom}px`,
-          paddingLeft: `${containerPaddingLeft}px`,
-          paddingRight: `${containerPaddingRight}px`,
-        }}
-      >
-        <button
-          type="button"
-          onClick={() => {
-            setWalletPanels((current) =>
-              current.map((entry) =>
-                entry.id === panel.id ? { ...entry, isChainOpen: !entry.isChainOpen } : entry,
-              ),
-            );
-          }}
-          className="group inline-flex items-center justify-center cursor-pointer pointer-events-auto"
-        >
-          <span
-            className="uppercase tracking-[0.3em] text-gray-400 group-hover:text-gray-200"
-            style={{ fontSize: `${titleFontSize}px`, fontFamily: titleFontFamily }}
-          >
-            {resolveWalletTitle(panel.chainKey)}
-          </span>
-        </button>
-        {panel.isChainOpen && (
-          <div
-            className="absolute left-1/2 top-full z-[120] -translate-x-1/2 rounded-xl border border-gray-500 bg-gray-900 shadow-2xl pointer-events-auto overflow-hidden"
-            style={{
-              fontSize: `${chainDropdownFontSize}px`,
-              fontFamily: titleFontFamily,
-              marginTop: `${titlePaddingBottom}px`,
-              width: `${chainDropdownWidth}px`,
-            }}
-          >
-            {walletChainOptions.filter((option) => option.key !== panel.chainKey).map((option) => {
-              const isSelected = panel.chainKey === option.key;
-              return (
-                <button
-                  key={option.key}
-                  type="button"
-                  onClick={() => {
-                    setWalletPanels((current) =>
-                      current.map((entry) =>
-                        entry.id === panel.id
-                          ? { ...entry, chainKey: option.key, isChainOpen: false }
-                          : entry,
-                      ),
-                    );
-                    if (option.key !== 'ALL') {
-                      void fetchBalancesForChain(option.key, { forceRefresh: true });
-                    }
-                  }}
-                  className="flex w-full items-center uppercase tracking-[0.3em] text-gray-300 hover:bg-gray-800 transition-colors cursor-pointer"
-                  style={{
-                    paddingLeft: `${containerPaddingLeft}px`,
-                    paddingRight: `${containerPaddingRight}px`,
-                    paddingTop: '8px',
-                    paddingBottom: '8px',
-                  }}
-                >
-                  <span className="mr-2 w-4 flex justify-center">
-                    {isSelected ? <Check className="w-4 h-4 text-white" /> : null}
-                  </span>
-                  <span className="flex-1 text-left">{option.label}</span>
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </div>
-      <div
-        className="flex w-full items-center justify-center gap-2 py-1.5 text-sm text-gray-300"
-        style={{
-          paddingLeft: `${containerPaddingLeft}px`,
-          paddingRight: `${containerPaddingRight}px`,
-        }}
-      >
-        {(() => {
-          const withdrawState = resolveWithdrawState(panel.id);
-          const withdrawActive = withdrawState.active;
-          const tokenOptions = resolveTokenRows(panel.chainKey);
-          const withdrawInputId = `withdraw-token-${panel.id}`;
-          return (
-            <>
-              <button
-                type="button"
-                onClick={() => toggleWithdrawPanel(panel.id)}
-                className={`flex items-center justify-center rounded-lg border transition-colors cursor-pointer ${withdrawActive
-                  ? 'border-blue-400 bg-blue-500/20 text-blue-100'
-                  : 'border-gray-700 bg-gray-800/60 text-gray-100 hover:border-gray-500 hover:bg-gray-800'
-                }`}
-                style={{
-                  height: `${buttonHeight}px`,
-                  paddingLeft: `${buttonPaddingX}px`,
-                  paddingRight: `${buttonPaddingX}px`,
-                  fontSize: `${buttonFontSize}px`,
-                }}
-              >
-                Withdraw
-              </button>
-              {withdrawActive ? (
-                <div className="flex-1">
-                  <input
-                    type="text"
-                    list={withdrawInputId}
-                    value={withdrawState.token}
-                    onChange={(event) => updateWithdrawToken(panel.id, event.target.value)}
-                    placeholder="Select token..."
-                    className="w-full rounded-lg border border-gray-700 bg-gray-800/60 text-gray-100 placeholder-gray-500 focus:border-gray-500 focus:outline-none"
-                    style={{
-                      height: `${buttonHeight}px`,
-                      paddingLeft: `${withdrawSymbolPaddingLeft}px`,
-                      paddingRight: `${withdrawSymbolPaddingRight}px`,
-                      fontSize: `${buttonFontSize}px`,
-                    }}
-                  />
-                  <datalist id={withdrawInputId}>
-                    {tokenOptions.map((symbol) => (
-                      <option key={symbol} value={symbol} />
-                    ))}
-                  </datalist>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  className="flex items-center justify-center rounded-lg border border-gray-700 bg-gray-800/60 text-gray-100 hover:border-gray-500 hover:bg-gray-800 transition-colors cursor-pointer"
-                  style={{
-                    height: `${buttonHeight}px`,
-                    paddingLeft: `${buttonPaddingX}px`,
-                    paddingRight: `${buttonPaddingX}px`,
-                    fontSize: `${buttonFontSize}px`,
-                  }}
-                >
-                  Get Crypto
-                </button>
-              )}
-            </>
-          );
-        })()}
-      </div>
-      {resolveWithdrawState(panel.id).active ? (
-        <>
-          <div
-            className="flex w-full items-center gap-2 py-1.5 text-sm text-gray-300"
-            style={{
-              paddingLeft: `${containerPaddingLeft}px`,
-              paddingRight: `${containerPaddingRight}px`,
-            }}
-          >
-            <span className="text-sm text-gray-300 whitespace-nowrap">Amount:</span>
-            <div className="relative flex flex-1 min-w-0">
-              <input
-                type="text"
-                inputMode="decimal"
-                value={resolveWithdrawState(panel.id).amount}
-                onChange={(event) => updateWithdrawAmount(panel.id, event.target.value)}
-                placeholder="0.00"
-                className="flex w-full items-center justify-center rounded-lg border border-gray-700 bg-gray-800/60 leading-none focus:border-gray-500 focus:outline-none"
-                style={{
-                  height: `${buttonHeight}px`,
-                  paddingLeft: `${withdrawAmountInputPaddingLeft}px`,
-                  paddingRight: `${withdrawAmountInputPaddingRight}px`,
-                  fontSize: `${withdrawAmountInputFontSize}px`,
-                  color: withdrawAmountInputColor,
-                }}
-              />
-              {(() => {
-                const selectedToken = resolveWithdrawState(panel.id).token;
-                const hasSelectedToken = Boolean(selectedToken && selectedToken.trim());
-                const maxColor = !hasSelectedToken
-                  ? withdrawMaxInactiveColor
-                  : isMaxHovering
-                    ? withdrawMaxHighlightColor
-                    : withdrawMaxColor;
-                return (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!hasSelectedToken) return;
-                      const normalizedToken = selectedToken.trim().toUpperCase();
-                      const chainKey = panel.chainKey === 'ALL' ? null : panel.chainKey;
-                      const gasToken = chainKey ? GAS_TOKENS[chainKey] : null;
-                      const reserve = chainKey ? Number(GAS_RESERVES[chainKey] ?? 0) : 0;
-                      const balanceValue = resolveBalanceForSymbol(panel.chainKey, normalizedToken);
-                      const balanceNumber = Number(balanceValue);
-                      const isGasToken = gasToken && normalizedToken === gasToken;
-                      const effective = isGasToken && Number.isFinite(balanceNumber)
-                        ? Math.max(0, balanceNumber - reserve)
-                        : balanceValue;
-                      updateWithdrawAmount(panel.id, effective.toString());
-                    }}
-                    onMouseEnter={() => {
-                      if (hasSelectedToken) setIsMaxHovering(true);
-                    }}
-                    onMouseLeave={() => setIsMaxHovering(false)}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 font-semibold cursor-pointer"
-                    style={{
-                      fontSize: `${withdrawMaxFontSize}px`,
-                      color: maxColor,
-                    }}
-                  >
-                    MAX
-                  </button>
-                );
-              })()}
-            </div>
-            <span
-              className="whitespace-nowrap text-center"
-              style={{
-                fontSize: `${withdrawDollarValueFontSize}px`,
-                fontFamily: withdrawDollarValueFontFamily,
-                color: withdrawDollarValueColor,
-                width: withdrawDollarValueWidth ? `${withdrawDollarValueWidth}px` : undefined,
-                paddingLeft: `${withdrawDollarValuePaddingLeft}px`,
-                paddingRight: `${withdrawDollarValuePaddingRight}px`,
-                textAlign: 'center',
-              }}
-            >
-              ($XX.XX)
-            </span>
-          </div>
-          <div
-            className="flex w-full items-center gap-2 py-1.5 text-sm text-gray-300"
-            style={{
-              paddingLeft: `${containerPaddingLeft}px`,
-              paddingRight: `${containerPaddingRight}px`,
-            }}
-          >
-            <span className="text-sm text-gray-300 whitespace-nowrap">Recipient:</span>
-            <textarea
-              rows={1}
-              value={resolveWithdrawState(panel.id).address}
-              onChange={(event) => updateWithdrawAddress(panel.id, event.target.value)}
-              placeholder="Recipient Address..."
-              className="flex w-full rounded-lg border border-gray-700 bg-gray-800/60 leading-snug focus:border-gray-500 focus:outline-none resize-none text-center"
-              style={{
-                minHeight: `${buttonHeight + 2}px`,
-                paddingLeft: `${withdrawAddressInputPaddingLeft}px`,
-                paddingRight: `${withdrawAddressInputPaddingRight}px`,
-                fontSize: `${withdrawAddressInputFontSize}px`,
-                color: withdrawAddressInputColor,
-                textAlign: 'center',
-              }}
-            />
-          </div>
-          <div
-              className="flex w-full items-center justify-center gap-2 py-1.5 text-sm text-gray-300"
-              style={{
-                paddingLeft: `${containerPaddingLeft}px`,
-                paddingRight: `${containerPaddingRight}px`,
-              }}
-            >
-            <button
-              type="button"
-              onClick={() => {
-                const state = resolveWithdrawState(panel.id);
-                const token = state.token?.trim();
-                const amount = state.amount?.trim();
-                const address = state.address?.trim();
-                if (!token || !amount || !address) return;
-                if (panel.chainKey === 'ALL') return;
-                const chainKey = panel.chainKey as ChainKey;
-                const run = async () => {
-                  if (isSolanaChain(chainKey)) {
-                    console.info('[Withdraw] Solana withdrawals coming soon.');
-                    return;
-                  }
-                  await sendEvmTransfer({ chainKey, recipient: address, tokenSymbol: token, amount });
-                };
-                void run().catch((err) => {
-                  console.warn('[Withdraw] submit failed', err);
-                });
-              }}
-              className="flex items-center justify-center rounded-lg transition-colors cursor-pointer"
-              style={{
-                height: `${buttonHeight}px`,
-                paddingLeft: `${withdrawSubmitButtonConfig.paddingLeft}px`,
-                paddingRight: `${withdrawSubmitButtonConfig.paddingRight}px`,
-                fontSize: `${buttonFontSize}px`,
-                color: withdrawSubmitButtonConfig.textColor,
-                backgroundColor: withdrawSubmitButtonConfig.buttonColor,
-                borderColor: withdrawSubmitButtonConfig.borderColor,
-                borderWidth: `${withdrawSubmitBorderWidth}px`,
-                borderStyle: 'solid',
-              }}
-            >
-              Submit Withdrawawal
-            </button>
-            <button
-              type="button"
-              onClick={() => toggleWithdrawPanel(panel.id)}
-              className="flex items-center justify-center rounded-lg transition-colors cursor-pointer"
-              style={{
-                height: `${buttonHeight}px`,
-                paddingLeft: `${withdrawCancelButtonConfig.paddingLeft}px`,
-                paddingRight: `${withdrawCancelButtonConfig.paddingRight}px`,
-                fontSize: `${buttonFontSize}px`,
-                color: withdrawCancelButtonConfig.textColor,
-                backgroundColor: withdrawCancelButtonConfig.buttonColor,
-                borderColor: withdrawCancelButtonConfig.borderColor,
-                borderWidth: `${withdrawCancelBorderWidth}px`,
-                borderStyle: 'solid',
-              }}
-            >
-              Cancel
-            </button>
-          </div>
-          {isSolanaChain(panel.chainKey) ? (
-            <div
-              className="w-full text-center text-xs text-gray-400"
-              style={{
-                paddingLeft: `${containerPaddingLeft}px`,
-                paddingRight: `${containerPaddingRight}px`,
-              }}
-            >
-              Coming Soon
-            </div>
-          ) : null}
-          <div className="h-[1px] bg-gray-700 w-full" />
-        </>
-      ) : null}
-      <div
-        className="flex w-full items-center gap-2 py-1.5 text-sm text-gray-300"
-        style={{
-          paddingLeft: `${containerPaddingLeft}px`,
-          paddingRight: `${containerPaddingRight}px`,
-        }}
-      >
-        <span className="text-sm text-gray-300 whitespace-nowrap">Wallet Address:</span>
-        <button
-          type="button"
-          onClick={() => {
-            const address = resolveWalletAddress(panel.chainKey);
-            if (address) navigator.clipboard?.writeText(address).catch(() => {});
-          }}
-          title={resolveWalletAddress(panel.chainKey) || 'Unknown'}
-          className="flex flex-1 min-w-0 items-center justify-center rounded-lg border border-gray-700 bg-gray-800/60 text-gray-100 leading-none hover:border-gray-500 hover:bg-gray-800 transition-colors cursor-pointer overflow-hidden"
-          style={{
-            height: `${buttonHeight}px`,
-            paddingLeft: `${buttonPaddingX / 2}px`,
-            paddingRight: `${buttonPaddingX / 2}px`,
-            fontSize: `${buttonFontSize}px`,
-          }}
-        >
-          <span
-            className="flex h-full items-center text-right text-sm leading-none relative top-[1px] truncate"
-            title={resolveWalletAddress(panel.chainKey) || 'Unknown'}
-          >
-            {formatDisplayAddress(resolveWalletAddress(panel.chainKey))}
-          </span>
-          <span className="flex w-4 justify-start ml-2">
-            <Copy className="w-4 h-4 inline-flex" />
-          </span>
-        </button>
-      </div>
-      <div className="h-[1px] bg-gray-700 w-full" />
-      {renderBalances(panel.chainKey)}
-    </div>
+            return;
+          }
+          const txHash = await sendEvmTransfer({ chainKey, recipient: address, tokenSymbol: token, amount });
+          setWithdrawReceipt((prev) => ({
+            ...prev,
+            [panel.id]: { active: true, status: 'executed', txHash },
+          }));
+          setWithdrawSubmittedDots((prev) => {
+            if (!prev[panel.id]) return prev;
+            const { [panel.id]: _removed, ...rest } = prev;
+            return rest;
+          });
+        };
+        void run().catch((err) => {
+          console.warn('[Withdraw] submit failed', err);
+        });
+      }}
+      renderBalances={renderBalances}
+    />
   );
 
-  const renderWalletPanel = (panel: { id: number; chainKey: ChainKey | 'ALL'; isChainOpen: boolean }) =>
-    renderWalletPanelInstance(panel);
-
   const renderAddPanel = () => (
-    <div
-      className="relative rounded-xl bg-gray-900 border border-gray-700 shadow-2xl overflow-visible flex flex-col"
-      style={{ width: `${addPanelWidth}px` }}
-    >
-      <button
-        type="button"
-        onClick={() => setIsAddPanelOpen(false)}
-        aria-label="Close wallet panel"
-        className="absolute z-10 text-gray-400 hover:text-gray-200 cursor-pointer"
-        style={{
-          top: `${addPanelClosePaddingTop}px`,
-          right: `${addPanelClosePaddingRight}px`,
-          fontSize: `${addPanelCloseSize}px`,
-          fontFamily: addPanelCloseFontFamily,
-          lineHeight: 1,
-        }}
-      >
-        ×
-      </button>
-      <div
-        className="relative flex items-center justify-start gap-3 pointer-events-none"
-        style={{
-          paddingTop: `${addPanelIconPaddingTop}px`,
-          paddingBottom: `${addPanelIconPaddingBottom}px`,
-          paddingLeft: `${addPanelPaddingLeft}px`,
-          paddingRight: `${addPanelPaddingRight}px`,
-        }}
-      >
-        <span
-          className="text-left"
-          style={{
-            fontSize: `${addPanelLabelFontSize}px`,
-            fontFamily: addPanelLabelFontFamily,
-            color: addPanelLabelColor,
-          }}
-        >
-          Add Panel:
-        </span>
-        <button
-          type="button"
-          onClick={() => setIsAddPanelChainOpen((current) => !current)}
-          onMouseEnter={() => setIsAddPanelIconHovered(true)}
-          onMouseLeave={() => setIsAddPanelIconHovered(false)}
-          className="group inline-flex items-center justify-center cursor-pointer pointer-events-auto"
-        >
-          <span
-            className="flex items-center justify-center rounded-full border transition-colors"
-            style={{
-              width: `${addPanelIconContainerSize}px`,
-              height: `${addPanelIconContainerSize}px`,
-              backgroundColor: addPanelIconButtons.container_color,
-              borderColor: isAddPanelChainOpen || isAddPanelIconHovered
-                ? addPanelIconButtons.highlight_color
-                : addPanelIconButtons.border_color,
-              borderWidth: `${addPanelIconBorderWidth}px`,
-              boxSizing: 'content-box',
-            }}
-          >
-            <Wallet
-              className="transition-colors"
-              color={addPanelIconButtons.icon_color}
-              style={{ width: `${addPanelIconSize}px`, height: `${addPanelIconSize}px` }}
-            />
-          </span>
-        </button>
-        {isAddPanelChainOpen && (
-          <div
-            className="absolute left-1/2 top-full z-[120] -translate-x-1/2 rounded-xl border border-gray-500 bg-gray-900 shadow-2xl pointer-events-auto overflow-hidden"
-            style={{
-              fontSize: `${addPanelChainDropdownFontSize}px`,
-              fontFamily: addPanelLabelFontFamily,
-              marginTop: `${addPanelTitlePaddingBottom}px`,
-              width: `${addPanelChainDropdownWidth}px`,
-            }}
-          >
-            {walletChainOptions
-              .filter((option) => option.key !== addPanelChain)
-              .filter((option) => {
-                const openChains = new Set<ChainKey | 'ALL'>(walletPanels.map((panel) => panel.chainKey));
-                return !openChains.has(option.key);
-              })
-              .map((option) => {
-              const isSelected = addPanelChain === option.key;
-              return (
-                <button
-                  key={option.key}
-                  type="button"
-                  onClick={() => {
-                    setAddPanelChain(option.key);
-                    setAddPanelHasCustomChain(true);
-                    setIsAddPanelChainOpen(false);
-                    setWalletPanels((current) => [
-                      ...current,
-                      {
-                        id: walletPanelIdRef.current + 1,
-                        chainKey: option.key,
-                        isChainOpen: false,
-                      },
-                    ]);
-                    if (option.key !== 'ALL') {
-                      void fetchBalancesForChain(option.key, { forceRefresh: true });
-                    }
-                    walletPanelIdRef.current += 1;
-                  }}
-                  className="flex w-full items-center uppercase tracking-[0.3em] text-gray-300 hover:bg-gray-800 transition-colors cursor-pointer"
-                  style={{
-                    paddingLeft: `${addPanelPaddingLeft}px`,
-                    paddingRight: `${addPanelPaddingRight}px`,
-                    paddingTop: '8px',
-                    paddingBottom: '8px',
-                  }}
-                >
-                  <span className="mr-2 w-4 flex justify-center">
-                    {isSelected ? <Check className="w-4 h-4 text-white" /> : null}
-                  </span>
-                  <span className="flex-1 text-left">{option.label}</span>
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    </div>
+    <AddPanel
+      width={addPanelWidth}
+      closePaddingTop={addPanelClosePaddingTop}
+      closePaddingRight={addPanelClosePaddingRight}
+      closeSize={addPanelCloseSize}
+      closeFontFamily={addPanelCloseFontFamily}
+      iconPaddingTop={addPanelIconPaddingTop}
+      iconPaddingBottom={addPanelIconPaddingBottom}
+      paddingLeft={addPanelPaddingLeft}
+      paddingRight={addPanelPaddingRight}
+      labelFontSize={addPanelLabelFontSize}
+      labelFontFamily={addPanelLabelFontFamily}
+      labelColor={addPanelLabelColor}
+      iconContainerSize={addPanelIconContainerSize}
+      iconBorderWidth={addPanelIconBorderWidth}
+      iconSize={addPanelIconSize}
+      iconButtons={addPanelIconButtons}
+      chainDropdownFontSize={addPanelChainDropdownFontSize}
+      chainDropdownWidth={addPanelChainDropdownWidth}
+      titlePaddingBottom={addPanelTitlePaddingBottom}
+      isChainOpen={isAddPanelChainOpen}
+      isIconHovered={isAddPanelIconHovered}
+      addPanelChain={addPanelChain}
+      walletPanels={walletPanels}
+      walletChainOptions={walletChainOptions}
+      onToggleChainOpen={() => setIsAddPanelChainOpen((current) => !current)}
+      onHoverStart={() => setAddPanelIconHovered(true)}
+      onHoverEnd={() => setAddPanelIconHovered(false)}
+      onClose={() => setIsAddPanelOpen(false)}
+      onSelectChain={(chainKey) => {
+        setAddPanelChain(chainKey);
+        setAddPanelHasCustomChain(true);
+        setIsAddPanelChainOpen(false);
+        addWalletPanel(chainKey);
+        if (chainKey !== 'ALL') {
+          void fetchBalancesForChain(chainKey, { forceRefresh: true });
+        }
+      }}
+    />
   );
 
   return (
@@ -1439,25 +1460,8 @@ export default function UserMenu() {
               setIsWalletPanelOpen((current) => {
                 const next = !current;
                 if (next) {
-                  setWalletPanels((existing) =>
-                    existing.length > 0
-                      ? existing
-                      : [
-                          {
-                            id: walletPanelIdRef.current + 1,
-                            chainKey: selectedChain,
-                            isChainOpen: false,
-                          },
-                        ],
-                  );
+                  initWalletPanels();
                   void fetchBalancesForChain(selectedChain, { forceRefresh: true });
-                  if (walletPanelIdRef.current === 0) {
-                    walletPanelIdRef.current += 1;
-                  }
-                  setWalletPanelHasCustomChain(false);
-                  setAddPanelChain(selectedChain);
-                  setAddPanelHasCustomChain(false);
-                  setIsAddPanelOpen(true);
                 } else {
                   setWalletPanels((existing) => (existing.length === 1 ? [] : existing));
                 }

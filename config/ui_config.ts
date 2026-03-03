@@ -11,6 +11,12 @@ export const WALLET_DISPLAY = { // Wallet panel/dropdown sizing and typography c
   paddingRight: 8, // Right padding for wallet rows in UserMenu.tsx
   buttonWidth: 27, // Button horizontal padding multiplier in UserMenu.tsx
   buttonHeight: 32, // Button height base in UserMenu.tsx
+  buttonColor: 'rgba(31, 41, 55, 0.6)', // Default top-row button background (bg-gray-800/60) in UserMenu.tsx
+  buttonBorderColor: '#374151', // Default top-row button border (border-gray-700) in UserMenu.tsx
+  buttonHighlightColor: '#2a3748', // Hover top-row button background (bg-gray-800) in UserMenu.tsx
+  buttonHighlightBorderColor: '#6b7280', // Hover top-row button border (border-gray-500) in UserMenu.tsx
+  buttonActiveColor: 'rgba(59, 130, 246, 0.2)', // Active top-row button background (bg-blue-500/20) in UserMenu.tsx
+  buttonActiveBorderColor: '#60a5fa', // Active top-row button border (border-blue-400) in UserMenu.tsx
   buttonSize: 1, // Global wallet size scalar in UserMenu.tsx
   rows: { // Token row vertical padding config used in renderBalances in UserMenu.tsx
     paddingTop: 6, // Top padding per token row in UserMenu.tsx
@@ -22,7 +28,6 @@ export const WALLET_DISPLAY = { // Wallet panel/dropdown sizing and typography c
     color: '#d1d5db', // Token symbol color in UserMenu.tsx
   },
   tokenBalances: { // Token balance typography and precision in renderBalances in UserMenu.tsx
-    
     fontSize: 14, // Token balance font size in UserMenu.tsx
     fontName: 'sans-serif', // Token balance font family in UserMenu.tsx
     color: '#f3f4f6', // Token balance color in UserMenu.tsx
@@ -40,9 +45,17 @@ export const WALLET_DISPLAY = { // Wallet panel/dropdown sizing and typography c
     size: 23, // Close icon size in UserMenu.tsx
     fontName: 'sans-serif', // Close font family in UserMenu.tsx
   },
+  walletAddressButton: {
+    activeDuration: 1.5
+  },
   chainDropdown: { // Wallet chain dropdown sizing in UserMenu.tsx
     width: 212, // Dropdown width in UserMenu.tsx
     fontSize: 12, // Dropdown font size in UserMenu.tsx
+  },
+  tokenDropdown: { 
+    width: 124,
+    fontSize: 12,
+    fontName: 'sans-serif',
   },
   withdraw: {
     symbolInput: {
@@ -79,6 +92,9 @@ export const WALLET_DISPLAY = { // Wallet panel/dropdown sizing and typography c
       textColor: '#f3f4f6',
       borderColor: "#f3f4f6",
       buttonColor: "#3b8b4f",
+      highlightColor: '#47a45e',
+      activeColor: '#55be6f',
+      activeBorderColor: "#ffffff",
       borderWidth: 1,
       paddingLeft: 8,
       paddingRight: 8,
@@ -88,6 +104,9 @@ export const WALLET_DISPLAY = { // Wallet panel/dropdown sizing and typography c
       textColor: '#f3f4f6',
       borderColor: "#f3f4f6",
       buttonColor: "#c74848",
+      highlightColor: '#e65757',
+      activeColor: '#ff7575',
+      activeBorderColor: "#ffffff",
       borderWidth: 1,
       fontSize: 12,
       paddingLeft: 8,
@@ -98,7 +117,7 @@ export const WALLET_DISPLAY = { // Wallet panel/dropdown sizing and typography c
 
 export const WALLET_CHAIN_LABELS = { // Chain label map for wallet titles in UserMenu.tsx (resolveWalletTitle)
   ETH_MAINNET: 'Ethereum', // Label for ETH mainnet in UserMenu.tsx
-  ETH_SEPOLIA: 'ETH Testnet', // Label for ETH Sepolia in UserMenu.tsx
+  ETH_SEPOLIA: 'Ethereum Testnet', // Label for ETH Sepolia in UserMenu.tsx
   BASE_MAINNET: 'Base', // Label for Base mainnet in UserMenu.tsx
   BASE_SEPOLIA: 'Base Testnet', // Label for Base Sepolia in UserMenu.tsx
   SOLANA_MAINNET: 'Solana', // Label for Solana mainnet in UserMenu.tsx
@@ -194,5 +213,12 @@ export const CHAT_PANEL = { // Chat panel styling used in altair_frontend1/src/c
   chat_highlight_color: '#3b82f6', // Chat highlight color in Chat.tsx
   chat_button_container_color: '#2563eb', // Chat button background in Chat.tsx
   chat_button_icon_color: '#ffffff', // Chat button icon color in Chat.tsx
+  typingSpeedMs: 2,
+  agentChatWidth: "85%",
+  userChatMaxWidth: "75%",
 };
 
+export const LOGO_DISPLAY = {
+  logoFile: 'random',
+  logoFileOptions: ['random', 'logo.png']
+};
