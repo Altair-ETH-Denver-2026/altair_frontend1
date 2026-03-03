@@ -33,13 +33,13 @@ export const getBackendBaseUrl = (): string => {
     if (host === 'localhost:3000') return localBackend;
     if (host.endsWith('.vercel.app')) return devBackend;
     if (host === prodHost) return prodBackend;
+  } else if (process.env.NODE_ENV === 'development') {
+    return localBackend;
   } else if (vercelHost) {
     if (vercelHost.endsWith('.vercel.app')) return devBackend;
     if (vercelHost === prodHost) return prodBackend;
   } else if (process.env.VERCEL_ENV === 'preview') {
     return devBackend;
-  } else if (process.env.NODE_ENV === 'development') {
-    return localBackend;
   }
 
   return prodBackend;
