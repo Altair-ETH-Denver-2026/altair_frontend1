@@ -4,12 +4,14 @@ import React, { useState, useRef, useEffect } from 'react';
 import { SpinningLogo } from './SpinningLogo';
 import { ShieldCheck, Send, Loader2 } from 'lucide-react';
 import { useLogoAsset } from '../lib/logo';
-import { usePrivy } from '@privy-io/react-auth';
+import { usePrivy, useWallets } from '@privy-io/react-auth';
 import { withWaitLogger } from '../lib/waitLogger';
 import { useSwap } from '../lib/useSwap';
 import { useSolanaSwap } from '../lib/useSolanaSwap';
+import { useRelayBridge } from '../lib/useRelayBridge';
+import { getRelayChainId, getCurrencyAddress, getCurrencyDecimals, parseRelayChainKey } from '../lib/relayChainMap';
 import { getCachedPrivyAccessToken } from '../lib/privyTokenCache';
-import { BLOCKCHAIN, CHAINS, type ChainKey } from '../../config/blockchain_config';
+import { BLOCKCHAIN, CHAINS, isPlaygroundMode, type ChainKey } from '../../config/blockchain_config';
 import * as SolanaTokens from '../../config/token_info/solana_tokens';
 import { CHAT_PANEL } from '../../config/ui_config';
 
@@ -27,6 +29,23 @@ interface SwapIntent {
   type: 'SWAP_INTENT';
   sell: string;
   buy: string;
+  amount: number | string;
+}
+
+interface BridgeIntent {
+  type: 'BRIDGE_INTENT';
+  originChain: string;
+  destinationChain: string;
+  currency: string;
+  amount: number | string;
+}
+
+interface CrossChainSwapIntent {
+  type: 'CROSS_CHAIN_SWAP_INTENT';
+  originChain: string;
+  destinationChain: string;
+  originCurrency: string;
+  destinationCurrency: string;
   amount: number | string;
 }
 
@@ -53,6 +72,7 @@ export default function Chat() {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isExecutingSwap, setIsExecutingSwap] = useState(false);
+  const [isExecutingBridgeIntent, setIsExecutingBridgeIntent] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const typingSpeedMs = CHAT_PANEL.typingSpeedMs;
   const logoAsset = useLogoAsset();
@@ -112,6 +132,41 @@ export default function Chat() {
     return null;
   };
 
+  const extractBridgeIntent = (text: string): BridgeIntent | null => {
+    const trimmed = text.trim();
+    const parse = (candidate: string) => {
+      try {
+        const o = JSON.parse(candidate) as { type?: string; originChain?: string; destinationChain?: string; currency?: string; amount?: number | string };
+        if (o?.type === 'BRIDGE_INTENT' && o.originChain && o.destinationChain && o.currency != null) return o as BridgeIntent;
+        return null;
+      } catch {
+        return null;
+      }
+    };
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) return parse(trimmed);
+    const first = trimmed.indexOf('{');
+    const last = trimmed.lastIndexOf('}');
+    if (first >= 0 && last > first) return parse(trimmed.slice(first, last + 1));
+    return null;
+  };
+
+  const extractCrossChainSwapIntent = (text: string): CrossChainSwapIntent | null => {
+    const trimmed = text.trim();
+    const parse = (candidate: string) => {
+      try {
+        const o = JSON.parse(candidate) as { type?: string; originChain?: string; destinationChain?: string; originCurrency?: string; destinationCurrency?: string; amount?: number | string };
+        if (o?.type === 'CROSS_CHAIN_SWAP_INTENT' && o.originChain && o.destinationChain && o.originCurrency != null && o.destinationCurrency != null) return o as CrossChainSwapIntent;
+        return null;
+      } catch {
+        return null;
+      }
+    };
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) return parse(trimmed);
+    const first = trimmed.indexOf('{');
+    const last = trimmed.lastIndexOf('}');
+    if (first >= 0 && last > first) return parse(trimmed.slice(first, last + 1));
+    return null;
+  }; 
 
   const resolveSelectedChain = (): ChainKey => {
     if (typeof window === 'undefined') return BLOCKCHAIN;
@@ -119,6 +174,10 @@ export default function Chat() {
     if (stored && stored in CHAINS) return stored as ChainKey;
     return BLOCKCHAIN;
   };
+  const selectedChain = resolveSelectedChain();
+  const isPlayground = isPlaygroundMode(selectedChain);
+  const { wallets } = useWallets();
+  const { executeQuote, isExecuting: isExecutingBridge } = useRelayBridge({ testnet: isPlayground });
 
   const prefetchSolanaTokensForIntent = async (intent: SwapIntent) => {
     const sell = intent.sell?.toUpperCase();
@@ -225,8 +284,75 @@ export default function Chat() {
     }
   };
 
+  const amountToSmallestUnit = (amount: number | string, decimals: number): string => {
+    const n = typeof amount === 'number' ? amount : parseFloat(String(amount));
+    if (Number.isNaN(n) || n < 0) return '0';
+    const mult = 10 ** decimals;
+    return String(BigInt(Math.floor(n * mult)));
+  };
+
+  const maybeExecuteBridgeIntent = async (aiResponse: string): Promise<string | null> => {
+    const bridge = extractBridgeIntent(aiResponse);
+    const crossSwap = extractCrossChainSwapIntent(aiResponse);
+    const intent = bridge ?? crossSwap;
+    if (!intent || !wallets?.length) return null;
+
+    const originKey = bridge
+      ? parseRelayChainKey(bridge.originChain)
+      : parseRelayChainKey((crossSwap as CrossChainSwapIntent).originChain);
+    const destKey = bridge
+      ? parseRelayChainKey(bridge.destinationChain)
+      : parseRelayChainKey((crossSwap as CrossChainSwapIntent).destinationChain);
+    if (!originKey || !destKey) return null;
+
+    const amountRaw = intent.amount;
+    const amount =
+      typeof amountRaw === 'number'
+        ? amountRaw.toString()
+        : String(amountRaw ?? '0');
+    if (!amount || Number(amount) <= 0) return null;
+
+    const testnet = isPlayground;
+    const originChainId = getRelayChainId(originKey, testnet);
+    const destChainId = getRelayChainId(destKey, testnet);
+
+    let originCurrency: string;
+    let destinationCurrency: string;
+    if (bridge) {
+      originCurrency = getCurrencyAddress(originKey, bridge.currency, testnet);
+      destinationCurrency = getCurrencyAddress(destKey, bridge.currency, testnet);
+    } else {
+      const c = intent as CrossChainSwapIntent;
+      originCurrency = getCurrencyAddress(originKey, c.originCurrency, testnet);
+      destinationCurrency = getCurrencyAddress(destKey, c.destinationCurrency, testnet);
+    }
+
+    const decimals = getCurrencyDecimals(originKey, bridge ? bridge.currency : (intent as CrossChainSwapIntent).originCurrency);
+    const amountWei = amountToSmallestUnit(amount, decimals);
+    const user = wallets[0].address;
+    const recipient = user;
+
+    setIsExecutingBridgeIntent(true);
+    try {
+      const result = await executeQuote({
+        originChainId,
+        destinationChainId: destChainId,
+        originCurrency,
+        destinationCurrency,
+        amount: amountWei,
+        user,
+        recipient,
+      });
+      if (result.error) return `Bridge failed: ${result.error}`;
+      const hashes = result.txHashes?.length ? result.txHashes.join(', ') : 'submitted';
+      return `Bridge executed. Transaction(s): ${hashes}`;
+    } finally {
+      setIsExecutingBridgeIntent(false);
+    }
+  };
+
   const handleSendMessage = async () => {
-    if (!input.trim() || isLoading || isExecutingSwap) return;
+    if (!input.trim() || isLoading || isExecutingSwap || isExecutingBridgeIntent) return;
 
     const userMessage = input;
     setInput('');
@@ -325,7 +451,9 @@ export default function Chat() {
         await prefetchSolanaTokensForIntent(intent);
       }
 
-      const executionNote = await maybeExecuteSwapIntent(content, data?.cid ?? null);
+      let executionNote = await maybeExecuteSwapIntent(content, data?.cid ?? null);
+      if (!executionNote) executionNote = await maybeExecuteBridgeIntent(content);
+
       if (executionNote) {
         console.log('[Swap Intent]', data.content);
       }
@@ -466,7 +594,7 @@ export default function Chat() {
         />
         <button 
           onClick={handleSendMessage}
-          disabled={isLoading || isExecutingSwap}
+          disabled={isLoading || isExecutingSwap || isExecutingBridgeIntent}
           className="disabled:opacity-50 p-2 rounded-xl transition-all cursor-pointer"
           style={{ backgroundColor: CHAT_PANEL.chat_button_container_color }}
         >

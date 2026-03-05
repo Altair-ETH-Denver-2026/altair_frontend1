@@ -11,6 +11,14 @@ export const CHAINS = {
 
 export type ChainKey = keyof typeof CHAINS; // union type for every supported chain identifier in Altair
 
+/** Chains that are part of the "Playground" testnet experience (Solana devnet, Base Sepolia, Ethereum Sepolia). */
+export const PLAYGROUND_CHAINS: readonly ChainKey[] = ['BASE_SEPOLIA', 'ETH_SEPOLIA'] as const;
+
+/** True when the selected chain is a Playground (testnet) chain. */
+export function isPlaygroundMode(chainKey: ChainKey): boolean {
+  return (PLAYGROUND_CHAINS as readonly string[]).includes(chainKey);
+}
+
 export const GAS_RESERVES = {
   BASE_SEPOLIA: '0.001',
   ETH_SEPOLIA: '0.001',

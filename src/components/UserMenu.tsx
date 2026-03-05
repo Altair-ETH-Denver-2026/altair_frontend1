@@ -14,7 +14,7 @@ import { UserRound, LogOut, Settings, Wallet, Wrench, Copy, Globe2, Check } from
 import WalletPanel from './panels/WalletPanel';
 import AddPanel from './panels/AddPanel';
 import { useEffect as useClientEffect, useState as useClientState } from 'react';
-import { BLOCKCHAIN, CHAINS, GAS_RESERVES, GAS_TOKENS, type ChainKey } from '../../config/blockchain_config';
+import { BLOCKCHAIN, CHAINS, GAS_RESERVES, GAS_TOKENS, isPlaygroundMode, type ChainKey } from '../../config/blockchain_config';
 import { BASE_MAINNET, BASE_SEPOLIA, ETH_MAINNET, ETH_SEPOLIA, SOLANA_MAINNET, resolveRpcUrls } from '../../config/chain_info';
 import * as BaseTokens from '../../config/token_info/base_tokens';
 import * as BaseSepoliaTokens from '../../config/token_info/base_testnet_sepolia_tokens';
@@ -1387,7 +1387,21 @@ export default function UserMenu() {
         )}
       </div>
 
-      {/* Network dropdown */}
+      {/* Network dropdown + Playground / Mainnet indicator */}
+      <div className="flex items-center gap-2">
+        <span
+          title={isPlaygroundMode(selectedChain) ? 'You are on Playground (testnets)' : 'You are on mainnets'}
+          className="shrink-0 px-2 py-0.5 rounded-md text-xs font-medium"
+          style={{
+            backgroundColor: isPlaygroundMode(selectedChain) ? 'rgba(245, 158, 11, 0.2)' : 'rgba(34, 197, 94, 0.2)',
+            color: isPlaygroundMode(selectedChain) ? '#f59e0b' : '#22c55e',
+            borderWidth: '1px',
+            borderStyle: 'solid',
+            borderColor: isPlaygroundMode(selectedChain) ? 'rgba(245, 158, 11, 0.5)' : 'rgba(34, 197, 94, 0.5)',
+          }}
+        >
+          {isPlaygroundMode(selectedChain) ? 'Playground' : 'Mainnet'}
+        </span>
       <div className="relative">
         <button
           onClick={() => {
@@ -1439,6 +1453,7 @@ export default function UserMenu() {
             })}
           </div>
         )}
+      </div>
       </div>
 
       {/* Wallet dropdown */}
