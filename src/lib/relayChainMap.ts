@@ -39,6 +39,13 @@ export function getRelayChainId(chainKey: ChainKey, testnet: boolean): number {
   return testnet ? RELAY_TESTNET_CHAIN_IDS[chainKey] : RELAY_MAINNET_CHAIN_IDS[chainKey];
 }
 
+/** In Playground, Relay only supports these chains for bridge/cross-chain (Base Sepolia 84532, Ethereum Sepolia 11155111). */
+export const RELAY_PLAYGROUND_CHAIN_KEYS: readonly ChainKey[] = ['BASE_SEPOLIA', 'ETH_SEPOLIA'] as const;
+
+export function isRelayPlaygroundAllowedChain(chainKey: ChainKey): boolean {
+  return (RELAY_PLAYGROUND_CHAIN_KEYS as readonly string[]).includes(chainKey);
+}
+
 type TokenMap = Record<string, { address: string; decimals: number }>;
 
 function toMap(

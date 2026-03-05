@@ -9,7 +9,7 @@ import { withWaitLogger } from '../lib/waitLogger';
 import { useSwap } from '../lib/useSwap';
 import { useSolanaSwap } from '../lib/useSolanaSwap';
 import { useRelayBridge } from '../lib/useRelayBridge';
-import { getRelayChainId, getCurrencyAddress, getCurrencyDecimals, parseRelayChainKey } from '../lib/relayChainMap';
+import { getRelayChainId, getCurrencyAddress, getCurrencyDecimals, parseRelayChainKey, isRelayPlaygroundAllowedChain } from '../lib/relayChainMap';
 import { getCachedPrivyAccessToken } from '../lib/privyTokenCache';
 import { BLOCKCHAIN, CHAINS, isPlaygroundMode, type ChainKey } from '../../config/blockchain_config';
 import * as SolanaTokens from '../../config/token_info/solana_tokens';
@@ -305,6 +305,12 @@ export default function Chat() {
       : parseRelayChainKey((crossSwap as CrossChainSwapIntent).destinationChain);
     if (!originKey || !destKey) return null;
 
+    if (isPlayground) {
+      if (!isRelayPlaygroundAllowedChain(originKey) || !isRelayPlaygroundAllowedChain(destKey)) {
+        return 'In Playground, bridge and cross-chain swap are only supported between Base Sepolia and Ethereum Sepolia. Switch to Mainnet to bridge or swap with Solana.';
+      }
+    }
+
     const amountRaw = intent.amount;
     const amount =
       typeof amountRaw === 'number'
@@ -395,8 +401,8 @@ export default function Chat() {
                 body: JSON.stringify({
                   message: userMessage,
                   history: messages.map(m => ({ role: m.role, content: m.content })),
-                  // Include Privy access token for backend verification
                   accessToken: privyAccessToken ?? null,
+                  selectedChain: selectedChain,
                 }),
               })
           );
