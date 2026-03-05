@@ -31,6 +31,8 @@ export interface UseRelayBridgeOptions {
 export interface RelayBridgeResult {
   txHashes?: string[];
   error?: string;
+  /** Set when error is from quote/API so UI can show cooldown for RATE_LIMIT */
+  errorCode?: 'RATE_LIMIT' | 'NO_ROUTE' | 'QUOTE_FAILED' | 'NETWORK' | 'EXECUTE';
 }
 
 /**
@@ -61,6 +63,7 @@ export function useRelayBridge(options: UseRelayBridgeOptions = {}) {
       try {
         ensureRelayClient(testnet);
 
+        setProgress({ currentStep: 'Getting fresh quote…' });
         const baseUrl =
           typeof window !== 'undefined' ? `${window.location.origin}/api/relay` : '';
         const quoteRes = await fetch(`${baseUrl}/quote/v2`, {
@@ -80,13 +83,23 @@ export function useRelayBridge(options: UseRelayBridgeOptions = {}) {
         });
 
         if (!quoteRes.ok) {
-          const errBody = await quoteRes.json().catch(() => ({}));
-          return { error: (errBody as { error?: string }).error ?? 'Failed to get quote' };
+          const errBody = await quoteRes.json().catch(() => ({})) as { error?: string; message?: string };
+          const msg = (errBody?.error ?? errBody?.message ?? '').toLowerCase();
+          if (quoteRes.status === 429) {
+            return { error: 'Rate limit reached. Try again in 30 seconds.', errorCode: 'RATE_LIMIT' };
+          }
+          if (quoteRes.status >= 500 || msg.includes('route') || msg.includes('no route') || msg.includes('no path')) {
+            return { error: 'No route right now. Try a smaller amount or different chains.', errorCode: 'NO_ROUTE' };
+          }
+          if (quoteRes.status === 400 && (msg.includes('chain') || msg.includes('network'))) {
+            return { error: 'Invalid chains. Switch network and try again.', errorCode: 'NETWORK' };
+          }
+          return { error: errBody?.error ?? errBody?.message ?? 'Failed to get quote', errorCode: 'QUOTE_FAILED' };
         }
 
         const quote = (await quoteRes.json()) as Record<string, unknown>;
         if (!quote?.steps?.length) {
-          return { error: 'No steps in quote' };
+          return { error: 'No route right now. Try a smaller amount or different chains.', errorCode: 'NO_ROUTE' };
         }
 
         let adapter: unknown;
@@ -118,7 +131,7 @@ export function useRelayBridge(options: UseRelayBridgeOptions = {}) {
 
         const client = getRelayClient();
         if (!client?.actions?.execute) {
-          return { error: 'Relay client not ready' };
+          return { error: 'Relay client not ready', errorCode: 'EXECUTE' };
         }
 
         const txHashes: string[] = [];
@@ -134,7 +147,7 @@ export function useRelayBridge(options: UseRelayBridgeOptions = {}) {
         return { txHashes: txHashes.length ? txHashes : undefined };
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e);
-        return { error: message };
+        return { error: message, errorCode: 'EXECUTE' };
       } finally {
         setIsExecuting(false);
         setProgress(null);

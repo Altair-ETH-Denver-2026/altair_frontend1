@@ -1,6 +1,11 @@
 /**
  * Maps Altair chain keys and token symbols to Relay API chain IDs and currency addresses.
  * Used by Chat bridge/cross-chain swap intents.
+ *
+ * Solana currency on Relay: For mainnet Solana, native SOL may use a different identifier
+ * in Relay's API. When testing "ETH Base → SOL Solana" flows, confirm quote/execute work;
+ * if Relay expects a different native-currency identifier for Solana, update getCurrencyAddress
+ * (and any Relay chain map) accordingly.
  */
 import type { ChainKey } from '../config/blockchain_config';
 import { BASE_MAINNET, BASE_SEPOLIA, ETH_MAINNET, ETH_SEPOLIA } from '../config/chain_info';
