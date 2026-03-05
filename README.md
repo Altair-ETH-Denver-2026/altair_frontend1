@@ -28,3 +28,5 @@ The frontend integrates with [Relay](https://relay.link) for **bridging** (same 
 - **Playground vs Mainnet:** A **Playground** pill (testnets: Base Sepolia, Ethereum Sepolia) or **Mainnet** pill appears next to the network selector. Relay uses testnet when you’re in Playground.
 - **Dependency:** `@relayprotocol/relay-sdk` is in `package.json`. If install fails due to peer conflicts, run `npm install --legacy-peer-deps` (or use your project’s package manager).
 - **Backend:** Requires the backend Relay proxy routes (`/api/relay/quote`, `/api/relay/chains`, etc.); see the backend README for optional `RELAY_API_KEY` and rate limits.
+
+**Backend proxy (best practice):** The backend should expose the Relay proxy routes as public (no auth) so the frontend can call them. The API key must never be sent from the frontend: keep `RELAY_API_KEY` only in backend env (e.g. Render). With no key set, Relay default rate limits apply; when you add a key, the proxy sends it server-side only. No change needed to exposing the routes—they are meant to be called by your app.
