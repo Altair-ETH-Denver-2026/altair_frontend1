@@ -2,10 +2,10 @@
  * Maps Altair chain keys and token symbols to Relay API chain IDs and currency addresses.
  * Used by Chat bridge/cross-chain swap intents.
  *
- * Solana currency on Relay: For mainnet Solana, native SOL may use a different identifier
- * in Relay's API. When testing "ETH Base → SOL Solana" flows, confirm quote/execute work;
- * if Relay expects a different native-currency identifier for Solana, update getCurrencyAddress
- * (and any Relay chain map) accordingly.
+ * Native currency on Relay: For all chains (EVM and Solana), Relay's quote API expects
+ * the zero address 0x0000000000000000000000000000000000000000 for native currency
+ * (ETH, SOL, etc.). See https://docs.relay.link/references/api/get-quote-v2
+ * (originCurrency/destinationCurrency default) and Get Currencies (isNative).
  */
 import type { ChainKey } from '../config/blockchain_config';
 import { BASE_MAINNET, BASE_SEPOLIA, ETH_MAINNET, ETH_SEPOLIA } from '../config/chain_info';
@@ -74,6 +74,7 @@ export function getCurrencyAddress(
 ): string {
   const upper = symbol.toUpperCase().trim();
   if (chainKey === 'SOLANA_MAINNET') {
+    // Relay uses 0x0 for native SOL on Solana (same as EVM native). See get-quote-v2 docs.
     if (upper === 'SOL' || upper === 'ETH') return NATIVE_EVM;
     return NATIVE_EVM;
   }
