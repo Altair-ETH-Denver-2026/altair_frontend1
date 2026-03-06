@@ -64,12 +64,6 @@ const isMissingSolanaToken = (symbol: string) => {
   return !entry || !entry.address;
 };
 
-const SAMPLE_PROMPTS: { label: string; text: string }[] = [
-  { label: 'Swap', text: 'I want to swap 0.1 ETH for USDC. What do I need to do?' },
-  { label: 'Bridge (Playground)', text: 'Bridge 0.01 ETH from Base Sepolia to Ethereum Sepolia' },
-  { label: 'Bridge (Mainnet)', text: 'Bridge 0.01 ETH from Base to Ethereum' },
-];
-
 export default function Chat() {
   const { authenticated, getAccessToken } = usePrivy();
   const executeSwap = useSwap();
@@ -524,24 +518,7 @@ export default function Chat() {
       {/* Messages Area */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-6 space-y-4 scrollbar-hide">
         {messages.length === 0 && (
-          <>
-            <p className="text-gray-500 text-center mt-20">Ask me to swap ETH for USDC or check your balance...</p>
-            <div className="flex flex-wrap justify-center gap-2 mt-4 px-4">
-              {SAMPLE_PROMPTS.filter((p) =>
-                p.label === 'Swap' || (p.label === 'Bridge (Playground)' && isPlayground) || (p.label === 'Bridge (Mainnet)' && !isPlayground)
-              ).map((prompt) => (
-                <button
-                  key={prompt.label}
-                  type="button"
-                  onClick={() => setInput(prompt.text)}
-                  className="px-3 py-1.5 rounded-lg text-sm border transition-colors hover:bg-gray-800/50"
-                  style={{ borderColor: CHAT_PANEL.border_color, color: CHAT_PANEL.agent_chat_text_color }}
-                >
-                  {prompt.label}
-                </button>
-              ))}
-            </div>
-          </>
+          <p className="text-gray-500 text-center mt-20">Ask me to swap ETH for USDC or check your balance...</p>
         )}
         {messages.map((m, i) => (
           m.role === 'assistant' ? (
