@@ -9,6 +9,15 @@ on:
 jobs:
   ci:
     runs-on: ubuntu-latest
+    env:
+      NEXT_PUBLIC_ALCHEMY_API_KEY: ${{ secrets.NEXT_PUBLIC_ALCHEMY_API_KEY }}
+      NEXT_PUBLIC_DEV_BACKEND_URL: ${{ secrets.NEXT_PUBLIC_DEV_BACKEND_URL }}
+      NEXT_PUBLIC_LOCAL_BACKEND_URL: ${{ secrets.NEXT_PUBLIC_LOCAL_BACKEND_URL }}
+      NEXT_PUBLIC_PRIVY_APP_ID: ${{ secrets.NEXT_PUBLIC_PRIVY_APP_ID }}
+      NEXT_PUBLIC_PROD_BACKEND_URL: ${{ secrets.NEXT_PUBLIC_PROD_BACKEND_URL }}
+      NEXT_PUBLIC_PROD_FRONTEND_URL: ${{ secrets.NEXT_PUBLIC_PROD_FRONTEND_URL }}
+      NEXT_PUBLIC_SOLANA_RPC_URL: ${{ secrets.NEXT_PUBLIC_SOLANA_RPC_URL }}
+
 
     steps:
       - name: Checkout
