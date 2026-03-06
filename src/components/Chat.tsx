@@ -6,6 +6,7 @@ import { ShieldCheck, Send, Loader2 } from 'lucide-react';
 import { useLogoAsset } from '../lib/logo';
 import { usePrivy } from '@privy-io/react-auth';
 import { withWaitLogger } from '../lib/waitLogger';
+import { getBackendBaseUrl } from '../lib/backendUrl';
 import { useSwap } from '../lib/useSwap';
 import { useSolanaSwap } from '../lib/useSolanaSwap';
 import { getCachedPrivyAccessToken } from '../lib/privyTokenCache';
@@ -244,8 +245,10 @@ export default function Chat() {
             () => getCachedPrivyAccessToken(getAccessToken)
           )
         : null;
+      const backendUrl = getBackendBaseUrl();
+
       console.log('[0G][frontend] chat request', {
-        backendUrl: process.env.NEXT_PUBLIC_BACKEND_URL ?? 'http://localhost:3001',
+        backendUrl,
         messageBytes: new TextEncoder().encode(userMessage).length,
         historyCount: messages.length,
         hasAccessToken: Boolean(privyAccessToken),
