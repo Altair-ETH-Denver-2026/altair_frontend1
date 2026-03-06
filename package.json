@@ -6,7 +6,9 @@
     "dev": "next dev -p 3000 --webpack",
     "build": "next build",
     "start": "next start -p 3000",
-    "lint": "eslint"
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@ethersproject/providers": "^5.8.0",
