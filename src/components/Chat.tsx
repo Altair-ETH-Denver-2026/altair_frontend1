@@ -289,7 +289,7 @@ export default function Chat() {
         amount,
         sellTokenChain: effectiveIntent.sellTokenChain,
         buyTokenChain: effectiveIntent.buyTokenChain,
-      });
+      }, cid ?? null);
       return `Relay request submitted: ${relayResult.requestId ?? 'pending'}`;
     }
 

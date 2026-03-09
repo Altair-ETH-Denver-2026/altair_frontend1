@@ -7,6 +7,17 @@ export type RelayQuoteRequest = {
   amount: string;
   tradeType: 'EXACT_INPUT' | 'EXACT_OUTPUT' | 'EXPECTED_OUTPUT';
   recipient?: string;
+  forceSolverExecution?: boolean;
+  useDepositAddress?: boolean;
+  useReceiver?: boolean;
+  strict?: boolean;
+  useExternalLiquidity?: boolean;
+  useFallbacks?: boolean;
+  includeComputeUnitLimit?: boolean;
+  maxRouteLength?: number;
+  useSharedAccounts?: boolean;
+  overridePriceImpact?: boolean;
+  disableOriginSwaps?: boolean;
 };
 
 export type RelayQuoteStepItem = {
@@ -17,6 +28,19 @@ export type RelayQuoteStepItem = {
     data?: string;
     value?: string;
     chainId?: number;
+    transaction?: string;
+    recentBlockhash?: string;
+    payer?: string;
+    addressLookupTableAddresses?: string[];
+    instructions?: Array<{
+      programId: string;
+      data: string;
+      keys: Array<{
+        pubkey: string;
+        isSigner: boolean;
+        isWritable: boolean;
+      }>;
+    }>;
   };
   check?: {
     endpoint?: string;

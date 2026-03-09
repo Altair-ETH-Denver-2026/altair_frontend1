@@ -224,7 +224,7 @@ export const CHAT_PANEL = { // Chat panel styling used in altair_frontend1/src/c
   chat_highlight_color: '#3b82f6', // Chat highlight color in Chat.tsx
   chat_button_container_color: '#2563eb', // Chat button background in Chat.tsx
   chat_button_icon_color: '#ffffff', // Chat button icon color in Chat.tsx
-  typingSpeedMs: 2,
+  typingSpeedMs: .5, // Rate of characters printed by AI per millisecond. Lower numbers are faster
   agentChatWidth: "85%",
   userChatMaxWidth: "75%",
 };
