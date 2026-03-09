@@ -5,10 +5,12 @@ import { SpinningLogo } from './SpinningLogo';
 import { ShieldCheck, Send, Loader2 } from 'lucide-react';
 import { useLogoAsset } from '../lib/logo';
 import { usePrivy } from '@privy-io/react-auth';
+import { useWallets as useSolanaWallets } from '@privy-io/react-auth/solana';
 import { withWaitLogger } from '../lib/waitLogger';
 import { getBackendBaseUrl } from '../lib/backendUrl';
 import { useSwap } from '../lib/useSwap';
 import { useSolanaSwap } from '../lib/useSolanaSwap';
+import { useRelay } from '../lib/useRelay';
 import { getCachedPrivyAccessToken } from '../lib/privyTokenCache';
 import { BLOCKCHAIN, CHAINS, type ChainKey } from '../../config/blockchain_config';
 import * as SolanaTokens from '../../config/token_info/solana_tokens';
@@ -25,11 +27,17 @@ interface Message {
 }
 
 interface SwapIntent {
-  type: 'SWAP_INTENT';
+  type: 'SINGLE_CHAIN_SWAP_INTENT' | 'CROSS_CHAIN_SWAP_INTENT' | 'BRIDGE_INTENT';
   sell: string;
-  buy: string;
+  buy?: string;
   amount: number | string;
+  sellTokenChain?: string | null;
+  buyTokenChain?: string | null;
 }
+
+type ExecutableSwapIntent = SwapIntent & {
+  type: 'SINGLE_CHAIN_SWAP_INTENT' | 'CROSS_CHAIN_SWAP_INTENT' | 'BRIDGE_INTENT';
+};
 
 type SolanaTokenConfig = { symbol?: string; name?: string; address?: string; decimals?: number };
 
@@ -48,12 +56,15 @@ const isMissingSolanaToken = (symbol: string) => {
 
 export default function Chat() {
   const { authenticated, getAccessToken } = usePrivy();
+  const { wallets: solanaWallets } = useSolanaWallets();
   const executeSwap = useSwap();
   const executeSolanaSwap = useSolanaSwap();
+  const executeRelay = useRelay();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isExecutingSwap, setIsExecutingSwap] = useState(false);
+  const [pendingIntent, setPendingIntent] = useState<SwapIntent | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const typingSpeedMs = CHAT_PANEL.typingSpeedMs;
   const logoAsset = useLogoAsset();
@@ -113,6 +124,35 @@ export default function Chat() {
     return null;
   };
 
+  const extractIntentJsonSlice = (text: string): { intent: SwapIntent; start: number; end: number } | null => {
+    const trimmed = text.trim();
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+      const intent = extractSwapIntent(trimmed);
+      if (intent?.type) {
+        return { intent, start: text.indexOf('{'), end: text.lastIndexOf('}') + 1 };
+      }
+      return null;
+    }
+    const firstBrace = text.indexOf('{');
+    const lastBrace = text.lastIndexOf('}');
+    if (firstBrace >= 0 && lastBrace > firstBrace) {
+      const candidate = text.slice(firstBrace, lastBrace + 1);
+      const intent = extractSwapIntent(candidate);
+      if (intent?.type) {
+        return { intent, start: firstBrace, end: lastBrace + 1 };
+      }
+    }
+    return null;
+  };
+
+  const stripIntentJson = (text: string): string => {
+    const slice = extractIntentJsonSlice(text);
+    if (!slice) return text;
+    const before = text.slice(0, slice.start);
+    const after = text.slice(slice.end);
+    return `${before}${after}`.trim();
+  };
+
 
   const resolveSelectedChain = (): ChainKey => {
     if (typeof window === 'undefined') return BLOCKCHAIN;
@@ -121,11 +161,26 @@ export default function Chat() {
     return BLOCKCHAIN;
   };
 
+  const resolveIntentChain = (intent?: SwapIntent | null): ChainKey => {
+    const sellChain = intent?.sellTokenChain ?? null;
+    const buyChain = intent?.buyTokenChain ?? null;
+    if (sellChain && sellChain in CHAINS) return sellChain as ChainKey;
+    if (buyChain && buyChain in CHAINS) return buyChain as ChainKey;
+    return resolveSelectedChain();
+  };
+
+  const isConfirmationMessage = (text: string): boolean => {
+    const normalized = text.trim().toLowerCase();
+    if (!normalized) return false;
+    const phrases = ['confirm', 'yes', 'execute', 'do it', 'ok', 'okay'];
+    return phrases.some((phrase) => normalized === phrase || normalized.includes(phrase));
+  };
+
   const prefetchSolanaTokensForIntent = async (intent: SwapIntent) => {
     const sell = intent.sell?.toUpperCase();
     const buy = intent.buy?.toUpperCase();
     if (!sell || !buy) return;
-    const selectedChain = resolveSelectedChain();
+    const selectedChain = resolveIntentChain(intent);
     if (selectedChain !== 'SOLANA_MAINNET') return;
     const sellNeedsLookup = isMissingSolanaToken(sell);
     const buyNeedsLookup = isMissingSolanaToken(buy);
@@ -192,19 +247,57 @@ export default function Chat() {
     }
   };
 
-  const maybeExecuteSwapIntent = async (aiResponse: string, cid?: string | null) => {
-    const intent = extractSwapIntent(aiResponse);
-    if (!intent || intent.type !== 'SWAP_INTENT') return null;
+  const maybeExecuteSwapIntent = async (
+    intent: SwapIntent | null,
+    cid: string | null | undefined,
+    userMessage: string
+  ) => {
+    const isConfirm = isConfirmationMessage(userMessage);
+    if (!isConfirm) {
+      if (intent) {
+        setPendingIntent(intent);
+      }
+      return null;
+    }
 
-    const sell = intent.sell?.toUpperCase();
-    const buy = intent.buy?.toUpperCase();
-    const amount = typeof intent.amount === 'number' ? intent.amount.toString() : intent.amount;
+    const effectiveIntent = (pendingIntent ?? intent) as ExecutableSwapIntent | null;
+    if (!effectiveIntent) {
+      return null;
+    }
+    setPendingIntent(null);
+
+    const sell = effectiveIntent.sell?.toUpperCase();
+    const buy = effectiveIntent.buy?.toUpperCase();
+    const amount = typeof effectiveIntent.amount === 'number' ? effectiveIntent.amount.toString() : effectiveIntent.amount;
+
+    if (!sell) {
+      return null;
+    }
 
     if (!amount || Number(amount) <= 0) {
       return null;
     }
 
-    const selectedChain = resolveSelectedChain();
+    if (effectiveIntent.type === 'BRIDGE_INTENT' || effectiveIntent.type === 'CROSS_CHAIN_SWAP_INTENT') {
+      if (!effectiveIntent.sellTokenChain || !effectiveIntent.buyTokenChain) {
+        return null;
+      }
+      const relayResult = await executeRelay({
+        type: effectiveIntent.type,
+        sell,
+        buy,
+        amount,
+        sellTokenChain: effectiveIntent.sellTokenChain,
+        buyTokenChain: effectiveIntent.buyTokenChain,
+      }, cid ?? null);
+      return `Relay request submitted: ${relayResult.requestId ?? 'pending'}`;
+    }
+
+    if (!buy) {
+      return null;
+    }
+
+    const selectedChain = resolveIntentChain(effectiveIntent);
     setIsExecutingSwap(true);
     try {
       const normalizedSell = selectedChain === 'SOLANA_MAINNET' && sell === 'ETH' ? 'SOL' : sell;
@@ -274,6 +367,8 @@ export default function Chat() {
                   history: messages.map(m => ({ role: m.role, content: m.content })),
                   // Include Privy access token for backend verification
                   accessToken: privyAccessToken ?? null,
+                  selectedChain: resolveSelectedChain(),
+                  solanaAddress: solanaWallets?.[0]?.address ?? null,
                 }),
               })
           );
@@ -324,11 +419,11 @@ export default function Chat() {
       });
 
       const intent = extractSwapIntent(content);
-      if (intent && intent.type === 'SWAP_INTENT') {
+      if (intent && intent.type === 'SINGLE_CHAIN_SWAP_INTENT') {
         await prefetchSolanaTokensForIntent(intent);
       }
 
-      const executionNote = await maybeExecuteSwapIntent(content, data?.cid ?? null);
+      const executionNote = await maybeExecuteSwapIntent(intent, data?.cid ?? null, userMessage);
       if (executionNote) {
         console.log('[Swap Intent]', data.content);
       }
@@ -342,7 +437,7 @@ export default function Chat() {
           ];
         }
 
-        const normalized = content.replace(/^[\s\r\n]+/, '');
+        const normalized = stripIntentJson(content).replace(/^[\s\r\n]+/, '');
         return [
           ...prev,
           {
