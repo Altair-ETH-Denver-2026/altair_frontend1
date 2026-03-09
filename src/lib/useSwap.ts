@@ -276,6 +276,28 @@ export const useSwap = (explicitChain?: ChainKey) => {
         },
         () => tx.wait()
       );
+      await withWaitLogger(
+        {
+          file: 'altair_frontend1/src/lib/useSwap.ts',
+          target: '/api/test-swap writeback',
+          description: 'swap writeback after confirmation',
+        },
+        () =>
+          fetch('/api/test-swap', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({
+              chain: selectedChain,
+              sellToken: effectiveSell,
+              buyToken: normalizedBuy,
+              amount: sellAmount,
+              recipient,
+              CID: CID ?? null,
+              txHash: tx.hash,
+            }),
+          })
+      );
       if (typeof window !== 'undefined') {
         window.dispatchEvent(
           new CustomEvent('altair:swap-complete', {
