@@ -222,6 +222,8 @@ export const useSwap = (explicitChain?: ChainKey) => {
         throw new Error('No swap route found');
       }
 
+      const methodParameters = routePayload.methodParameters;
+
       if (effectiveSell !== 'ETH') {
         const sellTokenAddress =
           effectiveSell === 'WETH' ? tokenConfig.WETH.address : routePayload.sellTokenAddress;
@@ -239,7 +241,7 @@ export const useSwap = (explicitChain?: ChainKey) => {
             target: 'ERC20.approve',
             description: 'token approval transaction submission',
           },
-          () => erc20Approve.approve(routePayload.methodParameters.to, ethers.MaxUint256)
+          () => erc20Approve.approve(methodParameters.to, ethers.MaxUint256)
         );
         await withWaitLogger(
           {
@@ -259,9 +261,9 @@ export const useSwap = (explicitChain?: ChainKey) => {
         },
         () =>
           managedSigner.sendTransaction({
-            to: routePayload.methodParameters.to,
-            data: routePayload.methodParameters.calldata,
-            value: routePayload.methodParameters.value,
+            to: methodParameters.to,
+            data: methodParameters.calldata,
+            value: methodParameters.value,
             gasLimit: 1_000_000n,
           })
       );
@@ -273,6 +275,28 @@ export const useSwap = (explicitChain?: ChainKey) => {
           description: 'swap transaction confirmation',
         },
         () => tx.wait()
+      );
+      await withWaitLogger(
+        {
+          file: 'altair_frontend1/src/lib/useSwap.ts',
+          target: '/api/test-swap writeback',
+          description: 'swap writeback after confirmation',
+        },
+        () =>
+          fetch('/api/test-swap', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({
+              chain: selectedChain,
+              sellToken: effectiveSell,
+              buyToken: normalizedBuy,
+              amount: sellAmount,
+              recipient,
+              CID: CID ?? null,
+              txHash: tx.hash,
+            }),
+          })
       );
       if (typeof window !== 'undefined') {
         window.dispatchEvent(
