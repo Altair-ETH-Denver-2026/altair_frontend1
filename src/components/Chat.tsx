@@ -15,7 +15,7 @@ import { getCachedPrivyAccessToken } from '../lib/privyTokenCache';
 import { BLOCKCHAIN, CHAINS, type ChainKey } from '../../config/blockchain_config';
 import * as SolanaTokens from '../../config/token_info/solana_tokens';
 import { CHAT_PANEL } from '../../config/ui_config';
-import { CHAT_BUTTON_ROW_TEMPLATES } from '../../../altair_backend1/config/ai_config';
+import { CHAT_BUTTON_ROW_TEMPLATES } from '../../config/ai_config';
 import {
   buildChatButtonRowFromIntent,
   buildChatButtonRowFromLogicTrigger,
