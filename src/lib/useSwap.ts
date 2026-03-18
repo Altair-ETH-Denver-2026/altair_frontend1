@@ -3,25 +3,14 @@
 import { usePrivy, useWallets } from '@privy-io/react-auth';
 import { ethers } from 'ethers';
 import { withWaitLogger } from './waitLogger';
-import { BLOCKCHAIN, CHAINS, WRAP_ETH, type ChainKey } from '@config/blockchain_config';
+import { BLOCKCHAIN, CHAINS, type ChainKey } from '@config/blockchain_config';
 import { BASE_MAINNET, BASE_SEPOLIA, ETH_MAINNET, ETH_SEPOLIA, resolveRpcUrls } from '@config/chain_info';
-import { WETH as BASE_WETH } from '@config/token_info/base_tokens';
-import { WETH as BASE_SEPOLIA_WETH } from '@config/token_info/base_testnet_sepolia_tokens';
-import { WETH as ETH_WETH } from '@config/token_info/eth_tokens';
-import { WETH as ETH_SEPOLIA_WETH } from '@config/token_info/eth_sepolia_testnet_tokens';
 
 const chainConfigs = {
   BASE_SEPOLIA,
   ETH_SEPOLIA,
   ETH_MAINNET,
   BASE_MAINNET,
-} as const;
-
-const tokenConfigs = {
-  BASE_SEPOLIA: { WETH: BASE_SEPOLIA_WETH },
-  ETH_SEPOLIA: { WETH: ETH_SEPOLIA_WETH },
-  ETH_MAINNET: { WETH: ETH_WETH },
-  BASE_MAINNET: { WETH: BASE_WETH },
 } as const;
 
 type EvmChainKey = Exclude<ChainKey, 'SOLANA_MAINNET'>;
@@ -111,7 +100,6 @@ export const useSwap = (explicitChain?: ChainKey) => {
       const evmChain = selectedChain as EvmChainKey;
       const chainConfig = chainConfigs[evmChain];
       console.log('[RPC] chainConfig rpcUrls:', chainConfig?.rpcUrls);
-      const tokenConfig = tokenConfigs[evmChain];
       if (!chainConfig) {
         throw new Error('Unsupported chain configuration.');
       }
@@ -159,33 +147,6 @@ export const useSwap = (explicitChain?: ChainKey) => {
 
       const effectiveSell = normalizedSell;
 
-      if (WRAP_ETH && normalizedSell === 'ETH' && normalizedBuy === 'WETH') {
-        const weth = new ethers.Contract(
-          tokenConfig.WETH.address,
-          ['function deposit() payable'],
-          managedSigner,
-        );
-
-        const wrapTx = await withWaitLogger(
-          {
-            file: 'altair_frontend1/src/lib/useSwap.ts',
-            target: 'WETH.deposit',
-            description: 'wrap ETH transaction submission',
-          },
-          () => weth.deposit({ value: amountWei })
-        );
-        await withWaitLogger(
-          {
-            file: 'altair_frontend1/src/lib/useSwap.ts',
-            target: 'WETH.deposit.wait',
-            description: 'wrap ETH confirmation',
-          },
-          () => wrapTx.wait()
-        );
-
-        return wrapTx.hash as string;
-      }
-
       const routeResponse = await withWaitLogger(
         {
           file: 'altair_frontend1/src/lib/useSwap.ts',
@@ -210,7 +171,18 @@ export const useSwap = (explicitChain?: ChainKey) => {
 
       if (!routeResponse.ok) {
         const errorPayload = await routeResponse.json().catch(() => ({}));
-        throw new Error(errorPayload?.error ?? 'Failed to fetch swap route');
+        const message = typeof errorPayload?.error === 'string'
+          ? errorPayload.error
+          : 'Failed to fetch swap route';
+        const err = new Error(message) as Error & {
+          code?: string;
+          payload?: unknown;
+          status?: number;
+        };
+        err.code = typeof errorPayload?.code === 'string' ? errorPayload.code : undefined;
+        err.payload = errorPayload;
+        err.status = routeResponse.status;
+        throw err;
       }
 
       const routePayload = (await routeResponse.json()) as {
@@ -225,8 +197,7 @@ export const useSwap = (explicitChain?: ChainKey) => {
       const methodParameters = routePayload.methodParameters;
 
       if (effectiveSell !== 'ETH') {
-        const sellTokenAddress =
-          effectiveSell === 'WETH' ? tokenConfig.WETH.address : routePayload.sellTokenAddress;
+        const sellTokenAddress = routePayload.sellTokenAddress;
         if (!sellTokenAddress) {
           throw new Error('Missing sell token address for approval');
         }

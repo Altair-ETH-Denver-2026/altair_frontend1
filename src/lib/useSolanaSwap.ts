@@ -1,6 +1,6 @@
 'use client';
 
-import { PublicKey, VersionedTransaction } from '@solana/web3.js';
+import { Connection, PublicKey, VersionedTransaction } from '@solana/web3.js';
 import bs58 from 'bs58';
 import { withWaitLogger } from './waitLogger';
 import { usePrivy } from '@privy-io/react-auth';
@@ -24,6 +24,44 @@ export function useSolanaSwap(explicitChain?: ChainKey) {
     buyToken: string,
     CID?: string | null
   ): Promise<string> => {
+    const formatUnknownError = (err: unknown) => {
+      if (err instanceof Error) {
+        return `${err.name}: ${err.message}`;
+      }
+      try {
+        return JSON.stringify(err);
+      } catch {
+        return String(err);
+      }
+    };
+
+    const extractSimulationLogsFromError = (err: unknown): string[] => {
+      if (!err || typeof err !== 'object') return [];
+
+      const root = err as {
+        logs?: unknown;
+        data?: unknown;
+        cause?: unknown;
+        simulationLogs?: unknown;
+      };
+
+      const candidates = [
+        root.logs,
+        root.simulationLogs,
+        (root.data as { logs?: unknown } | undefined)?.logs,
+        (root.cause as { logs?: unknown; data?: { logs?: unknown } } | undefined)?.logs,
+        (root.cause as { logs?: unknown; data?: { logs?: unknown } } | undefined)?.data?.logs,
+      ];
+
+      for (const candidate of candidates) {
+        if (Array.isArray(candidate)) {
+          return candidate.map((entry) => String(entry));
+        }
+      }
+
+      return [];
+    };
+
     if (!authenticated || !ready || !wallets?.length) {
       throw new Error('No authenticated Solana wallet available. Connect a Solana wallet in the app.');
     }
@@ -100,6 +138,10 @@ export function useSolanaSwap(explicitChain?: ChainKey) {
     const txBuffer = Buffer.from(swapTransactionBase64, 'base64');
     const versionedTx = VersionedTransaction.deserialize(txBuffer);
     const rpcUrl = payload?.solana?.rpcUrl;
+    const rpcConnection = new Connection(
+      rpcUrl && rpcUrl.trim().length > 0 ? rpcUrl.trim() : 'https://api.mainnet-beta.solana.com',
+      'confirmed'
+    );
     const refreshBlockhash = async () => {
       if (!rpcUrl) return;
       try {
@@ -127,6 +169,27 @@ export function useSolanaSwap(explicitChain?: ChainKey) {
     };
     await refreshBlockhash();
     let serialized = versionedTx.serialize();
+
+    // Preflight simulation before signing so we can surface actionable logs to the UI.
+    const preflight = await withWaitLogger(
+      {
+        file: 'altair_frontend1/src/lib/useSolanaSwap.ts',
+        target: 'Solana simulateTransaction',
+        description: 'Solana swap preflight simulation',
+      },
+      () => rpcConnection.simulateTransaction(versionedTx, { sigVerify: false, replaceRecentBlockhash: true })
+    );
+
+    if (preflight?.value?.err) {
+      const simErr = preflight.value.err;
+      const simLogs = preflight.value.logs ?? [];
+      console.error('[Solana Swap] preflight simulation failed', {
+        err: simErr,
+        logs: simLogs,
+      });
+      const joinedLogs = simLogs.length > 0 ? `\nSimulation logs:\n${simLogs.join('\n')}` : '';
+      throw new Error(`Solana swap preflight failed: ${JSON.stringify(simErr)}${joinedLogs}`);
+    }
 
     try {
       const { signature } = await withWaitLogger(
@@ -175,6 +238,17 @@ export function useSolanaSwap(explicitChain?: ChainKey) {
       return txHash;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+      const errorLogs = extractSimulationLogsFromError(err);
+      console.error('[Solana Swap] signAndSendTransaction failed', {
+        message: msg,
+        error: formatUnknownError(err),
+        logs: errorLogs,
+      });
+
+      if (errorLogs.length > 0) {
+        throw new Error(`${msg}\nSimulation logs:\n${errorLogs.join('\n')}`);
+      }
+
       if (msg.includes('403') || msg.includes('HTTP error (403)')) {
         throw new Error(
           'Solana RPC returned 403 (rate limit). Use a custom RPC: set NEXT_PUBLIC_SOLANA_RPC_URL in .env to a free RPC (e.g. Helius: https://www.helius.dev, QuickNode, Alchemy) and restart the dev server.'

@@ -61,17 +61,10 @@ export const ZBCN = {
   decimals: 9,
 };
 
-export const LION = {
-  symbol: 'LION',
-  name: 'Loaded Lions',
-  address: '',
-  decimals: 9,
-};
-
 export const ORCA = {
   symbol: 'ORCA',
   name: 'Orca',
-  address: '',
+  address: 'orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE',
   decimals: 6,
 };
 
@@ -85,22 +78,22 @@ export const VIRTUAL = {
 export const WIF = {
   symbol: 'WIF',
   name: 'dogwifhat',
-  address: '',
+  address: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
   decimals: 9,
 };
 
-export const POPCAT = {
-  symbol: 'POPCAT',
-  name: 'Popcat',
-  address: '',
+export const CBBTC = {
+  symbol: 'cbBTC',
+  name: 'Coinbase Wrapped BTC',
+  address: 'cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij',
   decimals: 9,
 };
 
 export const PENGU = {
   symbol: 'PENGU',
   name: 'Pudgy Penguins',
-  address: '',
-  decimals: 9,
+  address: '2zMMhcVQEXDtdE6vsFS7S7D5oUodfJHE8vd1gnBouauv',
+  decimals: 6,
 };
 
 export const ME = {
@@ -110,25 +103,18 @@ export const ME = {
   decimals: 6,
 };
 
-export const FARTCOIN = {
-  symbol: 'FARTCOIN',
-  name: 'Fartcoin',
-  address: '',
-  decimals: 9,
+export const WETH = {
+  symbol: 'WETH',
+  name: 'Wrapped Ether (Wormhole)',
+  address: '7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs',
+  decimals: 8,
 };
 
-export const BAN = {
-  symbol: 'BAN',
-  name: 'Comedian',
-  address: '',
-  decimals: 9,
-};
-
-export const ARC = {
-  symbol: 'ARC',
-  name: 'AI Rig Complex',
-  address: '',
-  decimals: 9,
+export const WBTC = {
+  symbol: 'WBTC',
+  name: 'Wrapped BTC (Wormhole)',
+  address: '3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh',
+  decimals: 8,
 };
 
 export const SOL = {
@@ -149,5 +135,12 @@ export const TNSR = {
   symbol: 'TNSR',
   name: 'Tensor',
   address: 'TNSRxcUxoT9xBG3de7PiJyTDYu7kskLqcpddxnEJAS6',
+  decimals: 6,
+};
+
+export const USDu = {
+  symbol: 'USDu',
+  name: 'USDu Unify Pay',
+  address: '9ckR7pPPvyPadACDTzLwK2ZAEeUJ3qGSnzPs8bVaHrSy',
   decimals: 6,
 };
