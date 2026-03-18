@@ -13,14 +13,16 @@ import { PublicKey } from '@solana/web3.js';
 import { UserRound, LogOut, Settings, Wallet, Wrench, Copy, Globe2, Check } from 'lucide-react';
 import WalletPanel from './panels/WalletPanel';
 import AddPanel from './panels/AddPanel';
-import { useEffect as useClientEffect, useState as useClientState } from 'react';
-import { BLOCKCHAIN, CHAINS, GAS_RESERVES, GAS_TOKENS, type ChainKey } from '../../config/blockchain_config';
+import { useEffect as useClientEffect } from 'react';
+import { BLOCKCHAIN, CHAINS, GAS_RESERVES, GAS_TOKENS, FORCE_QUERY_CHAINS, type ChainKey } from '../../config/blockchain_config';
 import { BASE_MAINNET, BASE_SEPOLIA, ETH_MAINNET, ETH_SEPOLIA, SOLANA_MAINNET, resolveRpcUrls } from '../../config/chain_info';
 import * as BaseTokens from '../../config/token_info/base_tokens';
 import * as BaseSepoliaTokens from '../../config/token_info/base_testnet_sepolia_tokens';
 import * as EthTokens from '../../config/token_info/eth_tokens';
 import * as EthSepoliaTokens from '../../config/token_info/eth_sepolia_testnet_tokens';
 import * as SolanaTokens from '../../config/token_info/solana_tokens';
+import type { ApiChainBalances, ApiTokenBalance } from '../../config/balance_types';
+import { normalizeBalancesResponse, resolveTokenRowsForChain } from '../lib/balanceTransforms';
 import { ADD_PANEL_DISPLAY, BALANCE_DECIMALS, MENU_ICONS, WALLET_CHAIN_LABELS, WALLET_CHAIN_OPTIONS, WALLET_DISPLAY } from '../../config/ui_config';
 
 export default function UserMenu() {
@@ -54,32 +56,9 @@ export default function UserMenu() {
   const [isDevOpen, setIsDevOpen] = useState(false);
   const [isSwapping, setIsSwapping] = useState(false);
   const [swapMessage, setSwapMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  const [ethBalance, setEthBalance] = useClientState<string>('0');
-  const [usdcBalance, setUsdcBalance] = useClientState<string>('0');
-  const [wethBalance, setWethBalance] = useClientState<string>('0');
-  const [daiBalance, setDaiBalance] = useClientState<string>('0');
-  const [solBalance, setSolBalance] = useClientState<string>('0');
-  const [balancesByChain, setBalancesByChain] = useState<
-    Record<ChainKey, {
-      eth?: string;
-      usdc?: string;
-      weth?: string;
-      dai?: string;
-      sol?: string;
-      address?: string;
-      solanaAddress?: string;
-    }>
-  >({} as Record<ChainKey, {
-      eth?: string;
-      usdc?: string;
-      weth?: string;
-      dai?: string;
-      sol?: string;
-      address?: string;
-      solanaAddress?: string;
-    }>);
-  const [evmAddress, setEvmAddress] = useClientState<string>('');
-  const [solanaAddress, setSolanaAddress] = useClientState<string>('');
+  const [balancesByChain, setBalancesByChain] = useState<Record<ChainKey, ApiChainBalances>>({} as Record<ChainKey, ApiChainBalances>);
+  const [evmAddress, setEvmAddress] = useState<string>('');
+  const [solanaAddress, setSolanaAddress] = useState<string>('');
   const [isNetworkOpen, setIsNetworkOpen] = useState(false);
   const [isWalletDropdownChainOpen, setIsWalletDropdownChainOpen] = useState(false);
   const [walletDropdownChain, setWalletDropdownChain] = useState<ChainKey | 'ALL'>('ALL');
@@ -92,6 +71,7 @@ export default function UserMenu() {
   const [tokenDropdownForceAll, setTokenDropdownForceAll] = useState<Record<number, boolean>>({});
   const [walletAddressCopyState, setWalletAddressCopyState] = useState<Record<string, boolean>>({});
   const walletAddressCopyTimers = useRef<Record<string, ReturnType<typeof setTimeout> | null>>({});
+  const balanceOverrideRef = useRef<Record<string, { value: string; expiresAt: number }>>({});
   const executeSwap = useSwap(selectedChain);
   const executeSolanaSwap = useSolanaSwap(selectedChain);
   const executeSolanaTransfer = useSolanaTransfer(selectedChain);
@@ -247,38 +227,50 @@ export default function UserMenu() {
 
   const applyBalanceSnapshot = (
     chainKey: ChainKey,
-    snapshot: {
-      eth?: string;
-      usdc?: string;
-      weth?: string;
-      dai?: string;
-      sol?: string;
-      address?: string;
-      solanaAddress?: string;
-    },
+    snapshot: Partial<ApiChainBalances>,
     solanaAddressValue?: string | null,
   ) => {
-    setBalancesByChain((prev) => ({
-      ...prev,
-      [chainKey]: {
-        eth: snapshot.eth,
-        usdc: snapshot.usdc,
-        weth: snapshot.weth,
-        dai: snapshot.dai,
-        sol: snapshot.sol,
-        address: snapshot.address,
-        solanaAddress: solanaAddressValue ?? snapshot.solanaAddress,
-      },
-    }));
-    if (chainKey === selectedChain) {
-      if (snapshot.eth) setEthBalance(snapshot.eth);
-      if (snapshot.usdc) setUsdcBalance(snapshot.usdc);
-      if (snapshot.weth) setWethBalance(snapshot.weth);
-      if (snapshot.dai) setDaiBalance(snapshot.dai);
-      if (snapshot.sol) setSolBalance(snapshot.sol);
-      if (snapshot.address) setEvmAddress(snapshot.address);
-      if (solanaAddressValue) setSolanaAddress(solanaAddressValue);
-    }
+    setBalancesByChain((prev) => {
+      const existing = prev[chainKey] ?? { tokens: {} };
+      const nextTokens: Record<string, ApiTokenBalance> = {
+        ...(existing.tokens ?? {}),
+        ...(snapshot.tokens ?? {}),
+      };
+
+      const now = Date.now();
+      Object.entries(nextTokens).forEach(([symbol, token]) => {
+        const cacheKey = `${chainKey}:${symbol.toUpperCase()}`;
+        const override = balanceOverrideRef.current[cacheKey];
+        if (!override) return;
+        if (override.expiresAt <= now) {
+          delete balanceOverrideRef.current[cacheKey];
+          return;
+        }
+        nextTokens[symbol] = {
+          ...token,
+          balance: override.value,
+        };
+      });
+
+      const merged: ApiChainBalances = {
+        ...existing,
+        ...snapshot,
+        tokens: nextTokens,
+        ...(solanaAddressValue !== undefined && solanaAddressValue !== null
+          ? { solanaAddress: solanaAddressValue }
+          : {}),
+      };
+
+      if (chainKey === selectedChain) {
+        if (merged.address !== undefined) setEvmAddress(merged.address);
+        if (merged.solanaAddress !== undefined) setSolanaAddress(merged.solanaAddress);
+      }
+
+      return {
+        ...prev,
+        [chainKey]: merged,
+      };
+    });
   };
 
   const loadCachedBalances = (cacheKey: string, chainKey: ChainKey, solanaAddressValue?: string | null) => {
@@ -288,27 +280,92 @@ export default function UserMenu() {
     try {
       const cached = JSON.parse(raw) as {
         timestamp: number;
-        data: {
-          eth?: string;
-          usdc?: string;
-          weth?: string;
-          dai?: string;
-          sol?: string;
-          address?: string;
-          solanaAddress?: string;
-        };
+        verifiedAt?: number; // Timestamp of last blockchain verification
+        source?: 'cache' | 'mongo' | 'blockchain' | 'stale';
+        chain?: ChainKey;
+        tokens: Record<string, ApiTokenBalance>;
+        address?: string;
+        solanaAddress?: string;
       };
-      if (!cached?.timestamp || !cached.data) return false;
-      const isFresh = Date.now() - cached.timestamp <= balanceCacheTtlMs;
-      if (!isFresh) return false;
-      applyBalanceSnapshot(chainKey, cached.data, solanaAddressValue);
+      if (!cached?.timestamp || !cached.tokens) return false;
+      
+      // Check if cache is marked as stale (e.g., from swap completion)
+      const isStale = cached.source === 'stale';
+      if (isStale) return false;
+      
+      // No TTL check - cache persists indefinitely
+      applyBalanceSnapshot(
+        chainKey,
+        {
+          tokens: cached.tokens,
+          address: cached.address,
+          solanaAddress: cached.solanaAddress,
+          source: cached.source,
+          verifiedAt: cached.verifiedAt,
+          timestamp: cached.timestamp,
+        },
+        solanaAddressValue
+      );
       return true;
     } catch {
       return false;
     }
   };
 
-  const fetchBalancesForChain = async (chainKey: ChainKey, { forceRefresh }: { forceRefresh: boolean }) => {
+  /**
+   * Mark cache as stale to trigger refresh on next load
+   */
+  const markCacheAsStale = (chainKey: ChainKey, address: string) => {
+    if (typeof window === 'undefined') return;
+    
+    const cacheKey = `cached:balances:${chainKey}:${address}`;
+    const raw = localStorage.getItem(cacheKey);
+    if (!raw) return;
+    
+    try {
+      const cached = JSON.parse(raw);
+      // Update cache entry to mark it as stale
+      localStorage.setItem(
+        cacheKey,
+        JSON.stringify({
+          ...cached,
+          source: 'stale' as const,
+          timestamp: Date.now(), // Update timestamp so we know when it was marked stale
+        })
+      );
+    } catch {
+      // If we can't parse the cache, just remove it
+      localStorage.removeItem(cacheKey);
+    }
+  };
+
+  /**
+   * Clear all balance caches on logout for privacy
+   */
+  const clearBalanceCaches = () => {
+    if (typeof window === 'undefined') return;
+    
+    // Get all localStorage keys
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith('cached:balances:')) {
+        keysToRemove.push(key);
+      }
+    }
+    
+    // Remove all balance cache entries
+    keysToRemove.forEach(key => {
+      localStorage.removeItem(key);
+    });
+    
+    console.log(`Cleared ${keysToRemove.length} balance cache entries on logout`);
+  };
+
+  const fetchBalancesForChain = async (
+    chainKey: ChainKey,
+    { forceRefresh, skipNetworkIfCached = false }: { forceRefresh: boolean; skipNetworkIfCached?: boolean }
+  ) => {
     if (!authenticated) return;
 
     const token = typeof window !== 'undefined' ? localStorage.getItem('privy:token') : null;
@@ -325,11 +382,18 @@ export default function UserMenu() {
     }
 
     const cacheKey = `cached:balances:${chainKey}:${chainKey === 'SOLANA_MAINNET' ? solanaAddressValue : cachedAddress ?? 'unknown'}`;
+    
+    // Step 1: Always try to load cached balances for immediate UI display
+    let cacheHit = false;
     if (!forceRefresh) {
-      const didUseCache = loadCachedBalances(cacheKey, chainKey, solanaAddressValue);
-      if (didUseCache) return;
+      cacheHit = loadCachedBalances(cacheKey, chainKey, solanaAddressValue);
+      if (cacheHit && skipNetworkIfCached) {
+        return;
+      }
+      // Don't return - we still want to trigger async verification
     }
 
+    // Step 2: Check if we already have an async verification in flight
     if (inFlightBalanceKey.current === cacheKey) return;
     inFlightBalanceKey.current = cacheKey;
 
@@ -362,22 +426,36 @@ export default function UserMenu() {
         () => res.json()
       );
 
-      applyBalanceSnapshot(chainKey, data ?? {}, solanaAddressValue);
+      const normalized = normalizeBalancesResponse({
+        chainKey,
+        payload: data,
+        fallbackSolanaAddress: solanaAddressValue,
+      });
+      const normalizedTokens = normalized.tokens ?? {};
+      applyBalanceSnapshot(
+        chainKey,
+        {
+          tokens: normalizedTokens,
+          address: normalized.address,
+          solanaAddress: normalized.solanaAddress,
+          source: normalized.source,
+          verifiedAt: normalized.verifiedAt,
+          timestamp: normalized.timestamp,
+        },
+        solanaAddressValue
+      );
 
       if (typeof window !== 'undefined') {
         localStorage.setItem(
           cacheKey,
           JSON.stringify({
-            timestamp: Date.now(),
-            data: {
-              eth: data?.eth,
-              usdc: data?.usdc,
-              weth: data?.weth,
-              dai: data?.dai,
-              sol: data?.sol,
-              address: data?.address,
-              solanaAddress: solanaAddressValue ?? undefined,
-            },
+            chain: chainKey,
+            tokens: normalizedTokens,
+            address: normalized.address,
+            solanaAddress: normalized.solanaAddress ?? solanaAddressValue ?? undefined,
+            timestamp: normalized.timestamp ?? Date.now(),
+            verifiedAt: normalized.verifiedAt ?? Date.now(),
+            source: normalized.source ?? 'blockchain',
           })
         );
       }
@@ -385,11 +463,8 @@ export default function UserMenu() {
       setBalancesByChain((prev) => ({
         ...prev,
         [chainKey]: {
-          eth: '0',
-          usdc: '0',
-          weth: '0',
-          dai: '0',
-          sol: '0',
+          ...(prev[chainKey] ?? {}),
+          tokens: {},
         },
       }));
     } finally {
@@ -425,24 +500,85 @@ export default function UserMenu() {
   useClientEffect(() => {
     const controller = new AbortController();
 
-    const run = async ({ forceRefresh, chainKey }: { forceRefresh: boolean; chainKey: ChainKey }) => {
+    const formatRawToHuman = (raw: string, decimals: number): string => {
+      try {
+        const value = BigInt(raw);
+        const isNegative = value < 0n;
+        const abs = isNegative ? -value : value;
+        const base = 10n ** BigInt(decimals);
+        const whole = abs / base;
+        const fraction = abs % base;
+        if (fraction === 0n) return `${isNegative ? '-' : ''}${whole.toString()}`;
+        const padded = fraction.toString().padStart(decimals, '0').replace(/0+$/, '');
+        return `${isNegative ? '-' : ''}${whole.toString()}.${padded}`;
+      } catch {
+        return '0';
+      }
+    };
+
+    const applyInstantBalanceUpdates = (updates: Array<{
+      chain: ChainKey;
+      symbol: string;
+      balanceAfterRaw: string | null;
+      decimals: number;
+    }>) => {
+      if (!updates.length) return;
+
+      const normalizeChainKey = (input: string): ChainKey | null => {
+        const raw = input.trim();
+        if (!raw) return null;
+        const upper = raw.toUpperCase();
+        if (upper in CHAINS) return upper as ChainKey;
+        const normalized = raw.toLowerCase().replace(/[\s_-]+/g, '');
+        if (normalized === 'solana' || normalized === 'solanamainnet') return 'SOLANA_MAINNET';
+        if (normalized === 'base' || normalized === 'basemainnet') return 'BASE_MAINNET';
+        if (normalized === 'basesepolia' || normalized === 'basesepoliatestnet') return 'BASE_SEPOLIA';
+        if (normalized === 'eth' || normalized === 'ethereum' || normalized === 'ethmainnet' || normalized === 'ethereummainnet') return 'ETH_MAINNET';
+        if (normalized === 'sepolia' || normalized === 'ethsepolia' || normalized === 'ethereumsepolia') return 'ETH_SEPOLIA';
+        return null;
+      };
+
+      const snapshotByChain: Record<string, { tokens: Record<string, ApiTokenBalance> }> = {};
+
+      updates.forEach((entry) => {
+        if (!entry.balanceAfterRaw || !entry.chain) return;
+        const chainKey = normalizeChainKey(entry.chain);
+        if (!chainKey) return;
+        const symbol = entry.symbol.trim().toUpperCase();
+        const human = formatRawToHuman(entry.balanceAfterRaw, entry.decimals);
+        balanceOverrideRef.current[`${chainKey}:${symbol}`] = {
+          value: human,
+          expiresAt: Date.now() + 25_000,
+        };
+        const bucket = (snapshotByChain[chainKey] ??= { tokens: {} });
+        bucket.tokens[symbol] = {
+          symbol,
+          balance: human,
+          decimals: entry.decimals,
+        };
+      });
+
+      (Object.entries(snapshotByChain) as Array<[string, { tokens: Record<string, ApiTokenBalance> }]>).forEach(
+        ([chainKeyRaw, snapshot]) => {
+          const chainKey = chainKeyRaw as ChainKey;
+          applyBalanceSnapshot(chainKey, snapshot);
+        }
+      );
+    };
+
+    const run = async ({
+      forceRefresh,
+      chainKey,
+      skipNetworkIfCached = false,
+    }: {
+      forceRefresh: boolean;
+      chainKey: ChainKey;
+      skipNetworkIfCached?: boolean;
+    }) => {
       if (!authenticated) {
-        setEthBalance('0');
-        setUsdcBalance('0');
-        setWethBalance('0');
-        setDaiBalance('0');
-        setSolBalance('0');
         setEvmAddress('');
         setSolanaAddress('');
-        setBalancesByChain({} as Record<ChainKey, {
-          eth?: string;
-          usdc?: string;
-          weth?: string;
-          dai?: string;
-          sol?: string;
-          address?: string;
-          solanaAddress?: string;
-        }>);
+        setBalancesByChain({} as Record<ChainKey, ApiChainBalances>);
         setIsWalletPanelOpen(false);
         if (typeof window !== 'undefined') {
           localStorage.removeItem(cachedEvmKey);
@@ -451,13 +587,24 @@ export default function UserMenu() {
         return;
       }
 
-      await fetchBalancesForChain(chainKey, { forceRefresh });
+      await fetchBalancesForChain(chainKey, { forceRefresh, skipNetworkIfCached });
     };
 
-    void run({ forceRefresh: false, chainKey: selectedChain });
+    const preloadAllChainsOnLogin = async () => {
+      const chainKeys = Object.keys(CHAINS) as ChainKey[];
+      await Promise.all(
+        chainKeys.map(async (chainKey) => {
+          await run({ forceRefresh: false, chainKey });
+        })
+      );
+    };
+
+    // Login/refresh preload across all chains so every token in Mongo-backed balances is cached client-side.
+    void preloadAllChainsOnLogin();
 
     const handleWalletOpen = () => {
-      void run({ forceRefresh: true, chainKey: selectedChain });
+      // Wallet-open should render from cache; only hit API when cache entry is missing.
+      void run({ forceRefresh: false, chainKey: selectedChain, skipNetworkIfCached: true });
     };
 
     if (typeof window !== 'undefined') {
@@ -465,7 +612,44 @@ export default function UserMenu() {
     }
 
     const handleSwapComplete = (event: Event) => {
-      const detail = (event as CustomEvent).detail as { chain?: ChainKey } | undefined;
+      const detail = (event as CustomEvent).detail as {
+        chain?: ChainKey;
+        balanceUpdates?: Array<{
+          chain: ChainKey;
+          symbol: string;
+          balanceAfterRaw: string | null;
+          decimals: number;
+        }>;
+      } | undefined;
+
+      if (Array.isArray(detail?.balanceUpdates) && detail.balanceUpdates.length > 0) {
+        applyInstantBalanceUpdates(detail.balanceUpdates);
+        
+        // Mark cache as stale for affected chains
+        const affectedChains = new Set<ChainKey>();
+        detail.balanceUpdates.forEach(update => {
+          if (update.chain) {
+            affectedChains.add(update.chain);
+          }
+        });
+        
+        // Get addresses for affected chains and mark cache stale
+        affectedChains.forEach(chainKey => {
+          if (chainKey === 'SOLANA_MAINNET') {
+            const solanaAddress = solanaWallets[0]?.address ??
+              (typeof window !== 'undefined' ? localStorage.getItem(cachedSolKey) : null);
+            if (solanaAddress) {
+              markCacheAsStale(chainKey, solanaAddress);
+            }
+          } else {
+            const evmAddress = typeof window !== 'undefined' ? localStorage.getItem(cachedEvmKey) : null;
+            if (evmAddress) {
+              markCacheAsStale(chainKey, evmAddress);
+            }
+          }
+        });
+      }
+
       if (detail?.chain && detail.chain !== selectedChain) return;
       void run({ forceRefresh: true, chainKey: selectedChain });
     };
@@ -507,24 +691,31 @@ export default function UserMenu() {
     return snapshot?.address ?? evmAddress;
   };
   const resolveBalanceForSymbol = (chainKey: ChainKey | 'ALL', symbol: string) => {
-    const snapshot = chainKey === 'ALL'
-      ? null
-      : balancesByChain[chainKey as ChainKey];
-    const fallback = {
-      eth: ethBalance,
-      usdc: usdcBalance,
-      weth: wethBalance,
-      dai: daiBalance,
-      sol: solBalance,
-    };
-    const data = snapshot ?? fallback;
     const normalized = symbol.trim().toUpperCase();
-    if (normalized === 'ETH') return data.eth ?? '0';
-    if (normalized === 'SOL') return data.sol ?? '0';
-    if (normalized === 'USDC') return data.usdc ?? '0';
-    if (normalized === 'WETH') return data.weth ?? '0';
-    if (normalized === 'DAI') return data.dai ?? '0';
-    return '0';
+    
+    if (chainKey === 'ALL') {
+      // Sum balances across all MAINNET chains for this token (exclude testnets)
+      let total = 0;
+      Object.entries(balancesByChain).forEach(([chain, balances]) => {
+        // Skip testnet chains (ETH_SEPOLIA, BASE_SEPOLIA)
+        if (chain === 'ETH_SEPOLIA' || chain === 'BASE_SEPOLIA') {
+          return;
+        }
+        
+        const balanceStr = balances.tokens?.[normalized]?.balance;
+        if (balanceStr !== undefined) {
+          const balanceNum = parseFloat(balanceStr);
+          if (!isNaN(balanceNum)) {
+            total += balanceNum;
+          }
+        }
+      });
+      return total.toString();
+    }
+    
+    // For specific chain
+    const snapshot = balancesByChain[chainKey as ChainKey];
+    return snapshot?.tokens?.[normalized]?.balance ?? '0';
   };
   const resolveRpcUrl = (chainKey: ChainKey) => {
     const chainConfigs = {
@@ -598,12 +789,7 @@ export default function UserMenu() {
     await tx.wait();
     return tx.hash as string;
   };
-  const resolveTokenRows = (chainKey: ChainKey | 'ALL') =>
-    chainKey === 'SOLANA_MAINNET'
-      ? ['SOL', 'USDC']
-      : chainKey === 'ALL'
-        ? ['ETH', 'SOL', 'USDC', 'WETH', 'DAI']
-        : ['ETH', 'USDC', 'WETH', 'DAI'];
+  const resolveTokenRows = (chainKey: ChainKey | 'ALL') => resolveTokenRowsForChain(balancesByChain, chainKey);
   const resolveWithdrawState = (panelId: number) =>
     withdrawPanels[panelId] ?? { active: false, token: '', amount: '', address: '' };
   const resolveWithdrawReceipt = (panelId: number) =>
@@ -784,26 +970,9 @@ export default function UserMenu() {
     }
   };
   const renderBalances = (chainKey: ChainKey | 'ALL') => {
-    const chainSnapshot = chainKey === 'ALL' ? null : balancesByChain[chainKey as ChainKey];
-    const snapshot = chainSnapshot ?? {
-      eth: ethBalance,
-      usdc: usdcBalance,
-      weth: wethBalance,
-      dai: daiBalance,
-      sol: solBalance,
-    };
     const rows = resolveTokenRows(chainKey);
     return rows.map((symbol, index) => {
-      const balanceValue =
-        symbol === 'ETH'
-          ? snapshot.eth
-          : symbol === 'SOL'
-            ? snapshot.sol
-            : symbol === 'USDC'
-              ? snapshot.usdc
-              : symbol === 'WETH'
-                ? snapshot.weth
-                : snapshot.dai;
+      const balanceValue = resolveBalanceForSymbol(chainKey, symbol);
       return (
         <React.Fragment key={symbol}>
           <div
@@ -909,7 +1078,7 @@ export default function UserMenu() {
           ),
         );
         if (chainKey !== 'ALL') {
-          void fetchBalancesForChain(chainKey, { forceRefresh: true });
+          void fetchBalancesForChain(chainKey, { forceRefresh: false, skipNetworkIfCached: true });
         }
       }}
       buttonHeight={buttonHeight}
@@ -1184,7 +1353,7 @@ export default function UserMenu() {
         setIsAddPanelChainOpen(false);
         addWalletPanel(chainKey);
         if (chainKey !== 'ALL') {
-          void fetchBalancesForChain(chainKey, { forceRefresh: true });
+          void fetchBalancesForChain(chainKey, { forceRefresh: false, skipNetworkIfCached: true });
         }
       }}
     />
@@ -1203,189 +1372,7 @@ export default function UserMenu() {
           {swapMessage.text}
         </div>
       )}
-      {/* Dev tools dropdown */}
-      <div className="relative">
-        <button
-          onClick={() => {
-        setIsDevOpen(!isDevOpen);
-        setIsWalletOpen(false);
-        setIsProfileOpen(false);
-        setIsNetworkOpen(false);
-      }}
-          title="Dev Tools"
-          className="flex items-center justify-center rounded-full border-[var(--border-color)] hover:border-[var(--highlight-color)] transition-all shadow-md cursor-pointer"
-          style={{
-            width: `${MENU_ICONS.size * 4 * 1.6}px`,
-            height: `${MENU_ICONS.size * 4 * 1.6}px`,
-            backgroundColor: MENU_ICONS.container_color,
-            borderColor: isDevOpen ? MENU_ICONS.highlight_color : undefined,
-            borderWidth: `${MENU_ICONS.border_width}px`,
-            boxSizing: 'content-box',
-            ['--border-color' as never]: MENU_ICONS.border_color,
-            ['--highlight-color' as never]: MENU_ICONS.highlight_color,
-          }}
-        >
-          <Wrench
-            className=""
-            style={{ width: `${MENU_ICONS.size * 4}px`, height: `${MENU_ICONS.size * 4}px` }}
-            color={MENU_ICONS.icon_color}
-          />
-        </button>
-        {isDevOpen && (
-          <div className="absolute right-0 mt-3 w-48 rounded-xl bg-gray-900 border border-gray-700 shadow-2xl z-[100] overflow-hidden flex flex-col">
-            <button
-              onClick={async () => {
-                setIsSwapping(true);
-                try {
-                  const result =
-                    selectedChain === 'SOLANA_MAINNET'
-                      ? await executeSolanaSwap('SOL', '0.0001', 'USDC')
-                      : await executeSwap('ETH', '0.000001', 'USDC');
-                  const txHash = result as string;
-                  console.log('[Test Swap] Swap complete:', txHash);
-                  showSwapMessage({
-                    type: 'success',
-                    text: `Swap complete.\n${txHash}`,
-                  });
-                } catch (error) {
-                  console.error('[Test Swap] Swap failed:', error);
-                  const message = error instanceof Error ? error.message : 'Swap failed';
-                  showSwapMessage({
-                    type: 'error',
-                    text: message,
-                  });
-                } finally {
-                  setIsSwapping(false);
-                  setIsDevOpen(false);
-                }
-              }}
-              disabled={isSwapping}
-              className="flex w-full items-center px-4 py-3 text-sm text-gray-300 hover:bg-gray-800 transition-colors text-left"
-            >
-              <span className="flex-1">
-                {selectedChain === 'SOLANA_MAINNET'
-                  ? 'Test Swap: 0.0001 SOL for USDC'
-                  : 'Test Swap: 0.000001 ETH for USDC'}
-              </span>
-            </button>
-            <div className="h-[1px] bg-gray-700 w-full" />
-            <button
-              onClick={async () => {
-                setIsSwapping(true);
-                try {
-                  const result =
-                    selectedChain === 'SOLANA_MAINNET'
-                      ? await executeSolanaSwap('USDC', '0.1', 'SOL')
-                      : await executeSwap('ETH', '0.000001', 'WETH');
-                  const txHash = result as string;
-                  console.log('[Test Swap] Swap complete:', txHash);
-                  showSwapMessage({
-                    type: 'success',
-                    text: `Swap complete.\n${txHash}`,
-                  });
-                } catch (error) {
-                  console.error('[Test Swap] Swap failed:', error);
-                  const message = error instanceof Error ? error.message : 'Swap failed';
-                  showSwapMessage({
-                    type: 'error',
-                    text: message,
-                  });
-                } finally {
-                  setIsSwapping(false);
-                  setIsDevOpen(false);
-                }
-              }}
-              disabled={isSwapping}
-              className="flex w-full items-center px-4 py-3 text-sm text-gray-300 hover:bg-gray-800 transition-colors text-left"
-            >
-              <span className="flex-1">
-                {selectedChain === 'SOLANA_MAINNET'
-                  ? 'Test Swap: 0.1 USDC for SOL'
-                  : 'Test Swap: 0.000001 ETH for WETH'}
-              </span>
-            </button>
-            <div className="h-[1px] bg-gray-700 w-full" />
-            <button
-              onClick={async () => {
-                setIsSwapping(true);
-                try {
-                  const result =
-                    selectedChain === 'SOLANA_MAINNET'
-                      ? await executeSolanaSwap('SOL', '0.0001', 'USDC')
-                      : await executeSwap('WETH', '0.000001', 'USDC');
-                  const txHash = result as string;
-                  console.log('[Test Swap] Swap complete:', txHash);
-                  showSwapMessage({
-                    type: 'success',
-                    text: `Swap complete.\n${txHash}`,
-                  });
-                } catch (error) {
-                  console.error('[Test Swap] Swap failed:', error);
-                  const message = error instanceof Error ? error.message : 'Swap failed';
-                  showSwapMessage({
-                    type: 'error',
-                    text: message,
-                  });
-                } finally {
-                  setIsSwapping(false);
-                  setIsDevOpen(false);
-                }
-              }}
-              disabled={isSwapping}
-              className="flex w-full items-center px-4 py-3 text-sm text-gray-300 hover:bg-gray-800 transition-colors text-left"
-            >
-              <span className="flex-1">
-                {selectedChain === 'SOLANA_MAINNET'
-                  ? 'Test Swap: 0.0001 SOL for USDC'
-                  : 'Test Swap: 0.000001 WETH for USDC'}
-              </span>
-            </button>
-            <div className="h-[1px] bg-gray-700 w-full" />
-            <button
-              onClick={async () => {
-                setIsSwapping(true);
-                try {
-                  const result =
-                    selectedChain === 'SOLANA_MAINNET'
-                      ? await executeSolanaSwap('USDC', '0.1', 'SOL')
-                      : await executeSwap('WETH', '0.00001', 'USDC');
-                  const txHash = result as string;
-                  console.log('[Test Swap] Swap complete:', txHash);
-                  showSwapMessage({
-                    type: 'success',
-                    text: `Swap complete.\n${txHash}`,
-                  });
-                } catch (error) {
-                  console.error('[Test Swap] Swap failed:', error);
-                  const message = error instanceof Error ? error.message : 'Swap failed';
-                  showSwapMessage({
-                    type: 'error',
-                    text: message,
-                  });
-                } finally {
-                  setIsSwapping(false);
-                  setIsDevOpen(false);
-                }
-              }}
-              disabled={isSwapping}
-              className="flex w-full items-center px-4 py-3 text-sm text-gray-300 hover:bg-gray-800 transition-colors text-left"
-            >
-              <span className="flex-1">
-                {selectedChain === 'SOLANA_MAINNET'
-                  ? 'Test Swap: 0.1 USDC for SOL'
-                  : 'Test Swap: 0.00001 WETH for USDC'}
-              </span>
-            </button>
-            <div className="h-[1px] bg-gray-700 w-full" />
-            <button
-              onClick={() => setIsDevOpen(false)}
-              className="flex w-full items-center px-4 py-3 text-sm text-gray-300 hover:bg-gray-800 transition-colors text-left"
-            >
-              <span className="flex-1">Test Withdraw</span>
-            </button>
-          </div>
-        )}
-      </div>
+      
 
       {/* Network dropdown */}
       <div className="relative">
@@ -1461,7 +1448,7 @@ export default function UserMenu() {
                 const next = !current;
                 if (next) {
                   initWalletPanels();
-                  void fetchBalancesForChain(selectedChain, { forceRefresh: true });
+                  void fetchBalancesForChain(selectedChain, { forceRefresh: false, skipNetworkIfCached: true });
                 } else {
                   setWalletPanels((existing) => (existing.length === 1 ? [] : existing));
                 }
@@ -1684,7 +1671,11 @@ export default function UserMenu() {
             <div className="h-[1px] bg-gray-700 w-full" />
             
             <button
-              onClick={() => { logout(); setIsProfileOpen(false); }}
+              onClick={() => {
+                clearBalanceCaches();
+                logout();
+                setIsProfileOpen(false);
+              }}
               className="flex w-full items-center px-4 py-3 text-sm text-red-400 hover:bg-gray-800 transition-colors text-left"
             >
               <LogOut className="w-4 h-4 mr-3" />

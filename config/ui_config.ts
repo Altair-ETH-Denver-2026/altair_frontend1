@@ -227,6 +227,22 @@ export const CHAT_PANEL = { // Chat panel styling used in altair_frontend1/src/c
   typingSpeedMs: .5, // Rate of characters printed by AI per millisecond. Lower numbers are faster
   agentChatWidth: "85%",
   userChatMaxWidth: "75%",
+  chatButtonRow: {
+    textColor: '#ffffff',
+    borderColor: "#ffffff",
+    buttonColor: "#2563eb",
+    highlightColor: '#6495ff',
+    activeColor: '#000000',
+    activeBorderColor: "#ffffff",
+    borderWidth: 1,
+    paddingLeft: 12,
+    paddingRight: 12,
+    fontSize: 14,
+    fontName: 'sans-serif',
+    borderRadius: 20,
+    paddingTop: 5,
+    paddingBottom: 5,
+  },
 };
 
 export const LOGO_DISPLAY = {
