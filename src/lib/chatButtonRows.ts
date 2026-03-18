@@ -1,6 +1,6 @@
 'use client';
 
-import { CHAT_BUTTON_ROW_TEMPLATES as AI_CHAT_BUTTON_ROW_TEMPLATES } from '../../../altair_backend1/config/ai_config';
+import { CHAT_BUTTON_ROW_TEMPLATES as AI_CHAT_BUTTON_ROW_TEMPLATES } from '../../config/ai_config';
 
 export type ChatSwapIntent = {
   type: 'SINGLE_CHAIN_SWAP_INTENT' | 'CROSS_CHAIN_SWAP_INTENT' | 'BRIDGE_INTENT';
