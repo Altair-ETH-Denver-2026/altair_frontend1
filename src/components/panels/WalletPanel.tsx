@@ -27,6 +27,12 @@ type WalletPanelProps = {
   buttonHeight: number;
   buttonPaddingX: number;
   buttonFontSize: number;
+  walletAddressButtonFontSize: number;
+  walletAddressButtonFontFamily: string;
+  walletAddressButtonFontColor: string;
+  walletAddressLabelFontSize: number;
+  walletAddressLabelFontFamily: string;
+  walletAddressLabelFontColor: string;
   topRowButtonColor: string;
   topRowButtonBorderColor: string;
   topRowButtonHighlightColor: string;
@@ -114,6 +120,12 @@ export default function WalletPanel({
   buttonHeight,
   buttonPaddingX,
   buttonFontSize,
+  walletAddressButtonFontSize,
+  walletAddressButtonFontFamily,
+  walletAddressButtonFontColor,
+  walletAddressLabelFontSize,
+  walletAddressLabelFontFamily,
+  walletAddressLabelFontColor,
   topRowButtonColor,
   topRowButtonBorderColor,
   topRowButtonHighlightColor,
@@ -619,7 +631,16 @@ export default function WalletPanel({
           paddingRight: `${containerPaddingRight}px`,
         }}
       >
-        <span className="text-sm text-gray-300 whitespace-nowrap">Wallet Address:</span>
+        <span
+          className="whitespace-nowrap"
+          style={{
+            fontSize: `${walletAddressLabelFontSize}px`,
+            fontFamily: walletAddressLabelFontFamily,
+            color: walletAddressLabelFontColor,
+          }}
+        >
+          Wallet Address:
+        </span>
         <button
           type="button"
           onClick={() => {
@@ -651,18 +672,25 @@ export default function WalletPanel({
             }
           }}
           title={resolveWalletAddress(panel.chainKey) || 'Unknown'}
-          className="flex flex-1 min-w-0 items-center justify-center rounded-lg border text-gray-100 leading-none transition-colors cursor-pointer overflow-hidden"
+          className="flex flex-1 min-w-0 items-center justify-center rounded-lg border leading-none transition-colors cursor-pointer overflow-hidden"
           style={{
             height: `${buttonHeight}px`,
             paddingLeft: `${buttonPaddingX / 2}px`,
             paddingRight: `${buttonPaddingX / 2}px`,
-            fontSize: `${buttonFontSize}px`,
+            fontSize: `${walletAddressButtonFontSize}px`,
+            fontFamily: walletAddressButtonFontFamily,
+            color: walletAddressButtonFontColor,
             backgroundColor: resolveWalletCopyActive(`panel-${panel.id}`) ? topRowButtonActiveColor : topRowButtonColor,
             borderColor: resolveWalletCopyActive(`panel-${panel.id}`) ? topRowButtonActiveBorderColor : topRowButtonBorderColor,
           }}
         >
           <span
-            className="flex h-full items-center text-right text-sm leading-none relative top-[1px] truncate"
+            className="flex h-full items-center text-right leading-none relative top-[1px] truncate"
+            style={{
+              fontSize: `${walletAddressButtonFontSize}px`,
+              fontFamily: walletAddressButtonFontFamily,
+              color: walletAddressButtonFontColor,
+            }}
             title={resolveWalletAddress(panel.chainKey) || 'Unknown'}
           >
             {resolveWalletCopyActive(`panel-${panel.id}`)

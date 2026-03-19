@@ -15,11 +15,11 @@ export const PANEL_DISPLAY = {
 export const WALLET_DISPLAY = { // Wallet panel/dropdown sizing and typography config consumed in altair_frontend1/src/components/UserMenu.tsx
   logo: true,
   options: ['panel', 'drop_down'] as const, // Allowed wallet UI modes read in UserMenu.tsx
-  active: 'panel' as 'panel' | 'drop_down', // Active mode switch used in UserMenu.tsx
+  active: 'panel', // Active mode switch used in UserMenu.tsx
   width: 270, // Panel/dropdown width in UserMenu.tsx
   paddingLeft: 14, // Left padding for wallet rows in UserMenu.tsx
   paddingRight: 8, // Right padding for wallet rows in UserMenu.tsx
-  buttonWidth: 27, // Button horizontal padding multiplier in UserMenu.tsx
+  buttonWidth: 25, // Button horizontal padding multiplier in UserMenu.tsx
   buttonHeight: 32, // Button height base in UserMenu.tsx
   buttonColor: 'rgba(31, 41, 55, 0.6)', // Default top-row button background (bg-gray-800/60) in UserMenu.tsx
   buttonBorderColor: '#374151', // Default top-row button border (border-gray-700) in UserMenu.tsx
@@ -56,7 +56,15 @@ export const WALLET_DISPLAY = { // Wallet panel/dropdown sizing and typography c
     fontName: 'sans-serif', // Close font family in UserMenu.tsx
   },
   walletAddressButton: {
-    activeDuration: 1.5
+    activeDuration: 1.5,
+    fontSize: 13,
+    fontName: 'sans-serif',
+    fontColor: '#f3f4f6',
+    label: {
+      fontSize: 14,
+      fontName: 'sans-serif',
+      fontColor: '#d1d5db'
+    }
   },
   chainDropdown: { // Wallet chain dropdown sizing in UserMenu.tsx
     width: 212, // Dropdown width in UserMenu.tsx
@@ -178,22 +186,31 @@ export const ADD_PANEL_DISPLAY = { // ADD_PANEL sizing, label, and icon styles i
 export const MENU_ICONS = { // Top-right menu icon styling in UserMenu.tsx
   x_offset: 3, // Icon x offset in UserMenu.tsx
   y_offset: 3, // Icon y offset in UserMenu.tsx
-  x_justify: 'right' as 'left' | 'right', // X justification for menu icons in UserMenu.tsx
-  y_justify: 'top' as 'top' | 'bottom', // Y justification for menu icons in UserMenu.tsx
+  x_justify: 'right', // X justification for menu icons in UserMenu.tsx
+  x_justifyOptions: ['right', 'left'],
+  y_justify: 'top', // Y justification for menu icons in UserMenu.tsx
+  y_justifyOptions: ['top', 'bottom'],
   size: 6, // Base icon size used in UserMenu.tsx
   icon_color: '#dbd1dbf7', // Icon stroke/fill color in UserMenu.tsx
   container_color: '#1f2937', // Icon button background color in UserMenu.tsx
   border_color: '#676869', // Icon button border color in UserMenu.tsx
   highlight_color: '#3b82f6', // Icon button active/hover border color in UserMenu.tsx
   border_width: 1, // Icon button border width in UserMenu.tsx
+  buttonText: {
+    fontSize: 14,
+    fontName: 'sans-serif',
+    fontColor: '#f3f4f6',
+  }
 };
 
 
 export const HOME_ICON = { // Home icon layout config used in top-left UI (altair_frontend1/src/components/SpinningLogo.tsx)
   x_offset: 3, // Home icon x offset in SpinningLogo.tsx
   y_offset: 3, // Home icon y offset in SpinningLogo.tsx
-  x_justify: 'left' as 'left' | 'right', // Home icon x justification in SpinningLogo.tsx
-  y_justify: 'top' as 'top' | 'bottom', // Home icon y justification in SpinningLogo.tsx
+  x_justify: 'left', // Home icon x justification in SpinningLogo.tsx
+  x_justifyOptions: ['right', 'left'],
+  y_justify: 'top', // Home icon y justification in SpinningLogo.tsx
+  y_justifyOptions: ['top', 'bottom'],
   size: 15, // Home icon size in SpinningLogo.tsx
 };
 

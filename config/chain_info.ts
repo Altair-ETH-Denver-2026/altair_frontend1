@@ -1,3 +1,17 @@
+// ⚠️⚠️⚠️ CRITICAL SYNCHRONIZATION WARNING ⚠️⚠️⚠️
+// This file MUST be kept IDENTICAL to altair_backend1/config/chain_info.ts
+// Any change made here MUST be duplicated in the other file immediately.
+// Failure to synchronize will cause runtime errors and broken functionality.
+//
+// REASON: Both frontend and backend need identical blockchain configuration
+// for token lists, chain definitions, and other shared constants.
+//
+// ✅ DO: Copy any addition/modification to both files
+// ❌ DON'T: Modify only one file
+//
+// Last verified sync: $(date) - Ensure both files match line-for-line
+// ⚠️⚠️⚠️ END WARNING ⚠️⚠️⚠️
+
 export const ALCHEMY_API_KEY_PLACEHOLDER = 'NEXT_PUBLIC_ALCHEMY_API_KEY'; // placeholder token injected into RPC URLs to pull the Alchemy key at runtime
 
 export const resolveRpcUrls = (rpcUrls: string[]) => {
@@ -11,6 +25,7 @@ export const resolveRpcUrls = (rpcUrls: string[]) => {
 };
 
 export const BASE_SEPOLIA = {
+  isTestnet: true,
   chainId: 84532, // Base Sepolia chain ID used to initialize EVM providers
   rpcUrls: [
     `https://base-sepolia.g.alchemy.com/v2/${ALCHEMY_API_KEY_PLACEHOLDER}`, // primary Base Sepolia RPC (Alchemy)
@@ -25,6 +40,7 @@ export const BASE_SEPOLIA = {
 };
 
 export const ETH_SEPOLIA = {
+  isTestnet: true,
   chainId: 11155111, // Ethereum Sepolia chain ID for testnet EVM operations
   rpcUrls: [
     `https://eth-sepolia.g.alchemy.com/v2/${ALCHEMY_API_KEY_PLACEHOLDER}`, // primary Ethereum Sepolia RPC (Alchemy)
@@ -39,6 +55,7 @@ export const ETH_SEPOLIA = {
 };
 
 export const ETH_MAINNET = {
+  isTestnet: false,
   chainId: 1, // Ethereum mainnet chain ID for production EVM connections
   rpcUrls: [
     `https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY_PLACEHOLDER}`, // primary Ethereum mainnet RPC (Alchemy)
@@ -53,6 +70,7 @@ export const ETH_MAINNET = {
 };
 
 export const BASE_MAINNET = {
+  isTestnet: false,
   chainId: 8453, // Base mainnet chain ID for production EVM connections
   rpcUrls: [
     `https://base-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY_PLACEHOLDER}`, // primary Base mainnet RPC (Alchemy)
@@ -67,11 +85,21 @@ export const BASE_MAINNET = {
 };
 
 export const SOLANA_MAINNET = {
+  isTestnet: false,
+  chainId: 792703809,
   rpcUrls: [
     'https://api.mainnet-beta.solana.com/', // Solana mainnet RPC for wallet, balances, and swap routes
   ],
   scanUrl: 'https://solscan.io', // block explorer base URL for Solana transactions
-  chainId: 792703809,
+};
+
+export const SOLANA_DEVNET = {
+  isTestnet: true,
+  chainId: 901,
+  rpcUrls: [
+    'https://api.devnet.solana.com/', // Solana devnet RPC for wallet, balances, and swap routes
+  ],
+  scanUrl: 'https://solscan.io/?cluster=devnet', // block explorer base URL for Solana devnet transactions
 };
 
 export const RELAY_CHAIN_INFO: Record<string, { chainId: number; scanUrl?: string; rpcUrls: string[] }> = {
