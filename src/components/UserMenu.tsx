@@ -9,6 +9,7 @@ import { useSolanaSwap } from '../lib/useSolanaSwap';
 import { useSolanaTransfer } from '../lib/useSolanaTransfer';
 import { withWaitLogger } from '../lib/waitLogger';
 import { usePanels } from '../lib/usePanels';
+import { getCachedPrivyAccessToken } from '../lib/privyTokenCache';
 import { PublicKey } from '@solana/web3.js';
 import { UserRound, LogOut, Settings, Wallet, Wrench, Copy, Globe2, Check } from 'lucide-react';
 import WalletPanel from './panels/WalletPanel';
@@ -26,7 +27,7 @@ import { normalizeBalancesResponse, resolveTokenRowsForChain } from '../lib/bala
 import { ADD_PANEL_DISPLAY, BALANCE_DECIMALS, MENU_ICONS, WALLET_CHAIN_LABELS, WALLET_CHAIN_OPTIONS, WALLET_DISPLAY } from '../../config/ui_config';
 
 export default function UserMenu() {
-  const { logout, authenticated } = usePrivy();
+  const { logout, authenticated, getAccessToken } = usePrivy();
   const { wallets } = useWallets();
   const { wallets: solanaWallets } = useSolanaWallets();
   const { signAndSendTransaction } = useSignAndSendTransaction();
@@ -162,6 +163,40 @@ export default function UserMenu() {
   const withdrawCancelHighlightColor = withdrawCancelButtonConfig.highlightColor ?? withdrawCancelButtonConfig.buttonColor;
   const withdrawCancelActiveColor = withdrawCancelButtonConfig.activeColor ?? withdrawCancelButtonConfig.buttonColor;
   const withdrawCancelActiveBorderColor = withdrawCancelButtonConfig.activeBorderColor ?? withdrawCancelButtonConfig.borderColor;
+  const menuButtonTextConfig = MENU_ICONS.buttonText ?? { fontSize: 13, fontName: 'sans-serif', fontColor: '#f3f4f6' };
+  const menuButtonTextFontSize = Number(menuButtonTextConfig.fontSize ?? 13);
+  const menuButtonTextFontFamily = menuButtonTextConfig.fontName ?? 'sans-serif';
+  const menuButtonTextFontColor = menuButtonTextConfig.fontColor ?? '#f3f4f6';
+  const networkOptions: ReadonlyArray<{ label: string; key: ChainKey }> = [
+    { label: 'ETH Mainnet', key: 'ETH_MAINNET' },
+    { label: 'Sepolia Testnet', key: 'ETH_SEPOLIA' },
+    { label: 'Base Mainnet', key: 'BASE_MAINNET' },
+    { label: 'Base Testnet', key: 'BASE_SEPOLIA' },
+    { label: 'Solana Mainnet', key: 'SOLANA_MAINNET' },
+  ];
+  const selectedNetworkLabel = networkOptions.find((option) => option.key === selectedChain)?.label ?? 'Network';
+  const walletAddressButtonConfig = WALLET_DISPLAY.walletAddressButton ?? {
+    activeDuration: 1.5,
+    fontSize: 14,
+    fontName: 'sans-serif',
+    fontColor: '#f3f4f6',
+    label: {
+      fontSize: 14,
+      fontName: 'sans-serif',
+      fontColor: '#d1d5db',
+    },
+  };
+  const walletAddressButtonFontSize = Number(walletAddressButtonConfig.fontSize ?? 14) * buttonSize;
+  const walletAddressButtonFontFamily = walletAddressButtonConfig.fontName ?? 'sans-serif';
+  const walletAddressButtonFontColor = walletAddressButtonConfig.fontColor ?? '#f3f4f6';
+  const walletAddressLabelConfig = walletAddressButtonConfig.label ?? {
+    fontSize: 14,
+    fontName: 'sans-serif',
+    fontColor: '#d1d5db',
+  };
+  const walletAddressLabelFontSize = Number(walletAddressLabelConfig.fontSize ?? 14) * buttonSize;
+  const walletAddressLabelFontFamily = walletAddressLabelConfig.fontName ?? 'sans-serif';
+  const walletAddressLabelFontColor = walletAddressLabelConfig.fontColor ?? '#d1d5db';
   const walletAddressCopyDurationMs = Math.max(
     0,
     Number(WALLET_DISPLAY.walletAddressButton?.activeDuration ?? 0) * 1000
@@ -368,7 +403,12 @@ export default function UserMenu() {
   ) => {
     if (!authenticated) return;
 
-    const token = typeof window !== 'undefined' ? localStorage.getItem('privy:token') : null;
+    let token: string | null = null;
+    try {
+      token = await getCachedPrivyAccessToken(getAccessToken);
+    } catch {
+      token = null;
+    }
     const cachedAddress = typeof window !== 'undefined' ? localStorage.getItem(cachedEvmKey) : null;
     const cachedSolana = typeof window !== 'undefined' ? localStorage.getItem(cachedSolKey) : null;
     const solanaAddressValue = chainKey === 'SOLANA_MAINNET'
@@ -410,7 +450,7 @@ export default function UserMenu() {
             headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
             body: JSON.stringify({
-              accessToken: token,
+              ...(token ? { accessToken: token } : {}),
               chain: chainKey,
               walletAddress: chainKey === 'SOLANA_MAINNET' ? solanaAddressValue ?? undefined : cachedAddress ?? undefined,
             }),
@@ -1084,6 +1124,12 @@ export default function UserMenu() {
       buttonHeight={buttonHeight}
       buttonPaddingX={buttonPaddingX}
       buttonFontSize={buttonFontSize}
+      walletAddressButtonFontSize={walletAddressButtonFontSize}
+      walletAddressButtonFontFamily={walletAddressButtonFontFamily}
+      walletAddressButtonFontColor={walletAddressButtonFontColor}
+      walletAddressLabelFontSize={walletAddressLabelFontSize}
+      walletAddressLabelFontFamily={walletAddressLabelFontFamily}
+      walletAddressLabelFontColor={walletAddressLabelFontColor}
       topRowButtonColor={topRowButtonColor}
       topRowButtonBorderColor={topRowButtonBorderColor}
       topRowButtonHighlightColor={topRowButtonHighlightColor}
@@ -1386,8 +1432,11 @@ export default function UserMenu() {
           title="Switch Chain"
           className="flex items-center justify-center rounded-full border-[var(--border-color)] hover:border-[var(--highlight-color)] transition-all shadow-md cursor-pointer"
           style={{
-            width: `${MENU_ICONS.size * 4 * 1.6}px`,
+            minWidth: `${MENU_ICONS.size * 4 * 1.6}px`,
             height: `${MENU_ICONS.size * 4 * 1.6}px`,
+            paddingLeft: `${MENU_ICONS.size * 1.5}px`,
+            paddingRight: `${MENU_ICONS.size * 2}px`,
+            gap: `${MENU_ICONS.size}px`,
             backgroundColor: MENU_ICONS.container_color,
             borderColor: isNetworkOpen ? MENU_ICONS.highlight_color : undefined,
             borderWidth: `${MENU_ICONS.border_width}px`,
@@ -1401,10 +1450,20 @@ export default function UserMenu() {
             style={{ width: `${MENU_ICONS.size * 4}px`, height: `${MENU_ICONS.size * 4}px` }}
             color={MENU_ICONS.icon_color}
           />
+          <span
+            className="whitespace-nowrap leading-none"
+            style={{
+              fontSize: `${menuButtonTextFontSize}px`,
+              fontFamily: menuButtonTextFontFamily,
+              color: menuButtonTextFontColor,
+            }}
+          >
+            {selectedNetworkLabel}
+          </span>
         </button>
         {isNetworkOpen && (
           <div className="absolute right-0 mt-3 w-48 rounded-xl bg-gray-900 border border-gray-700 shadow-2xl z-[100] overflow-hidden flex flex-col">
-            {[{ label: 'ETH Mainnet', key: 'ETH_MAINNET' as ChainKey }, { label: 'Sepolia Testnet', key: 'ETH_SEPOLIA' as ChainKey }, { label: 'Base Mainnet', key: 'BASE_MAINNET' as ChainKey }, { label: 'Base Testnet', key: 'BASE_SEPOLIA' as ChainKey }, { label: 'Solana Mainnet', key: 'SOLANA_MAINNET' as ChainKey }].map(({ label, key }) => {
+            {networkOptions.map(({ label, key }) => {
               const isSelected = key ? selectedChain === key : false;
               const handleClick = () => {
                 setSelectedChain(key);
@@ -1589,7 +1648,16 @@ export default function UserMenu() {
                 paddingRight: `${containerPaddingRight}px`,
               }}
             >
-              <span className="text-sm text-gray-300 whitespace-nowrap">Wallet Address:</span>
+              <span
+                className="whitespace-nowrap"
+                style={{
+                  fontSize: `${walletAddressLabelFontSize}px`,
+                  fontFamily: walletAddressLabelFontFamily,
+                  color: walletAddressLabelFontColor,
+                }}
+              >
+                Wallet Address:
+              </span>
               <button
                 type="button"
                 onClick={() => {
@@ -1597,15 +1665,25 @@ export default function UserMenu() {
                   if (address) navigator.clipboard?.writeText(address).catch(() => {});
                 }}
                 title={resolveWalletAddress(walletDropdownChain) || 'Unknown'}
-                className="flex flex-1 min-w-0 items-center justify-center rounded-lg border border-gray-700 bg-gray-800/60 text-gray-100 leading-none hover:border-gray-500 hover:bg-gray-800 transition-colors cursor-pointer overflow-hidden"
+                className="flex flex-1 min-w-0 items-center justify-center rounded-lg border border-gray-700 bg-gray-800/60 leading-none hover:border-gray-500 hover:bg-gray-800 transition-colors cursor-pointer overflow-hidden"
                 style={{
                   height: `${buttonHeight}px`,
                   paddingLeft: `${buttonPaddingX / 2}px`,
                   paddingRight: `${buttonPaddingX / 2}px`,
-                  fontSize: `${buttonFontSize}px`,
+                  fontSize: `${walletAddressButtonFontSize}px`,
+                  fontFamily: walletAddressButtonFontFamily,
+                  color: walletAddressButtonFontColor,
                 }}
               >
-                <span className="flex h-full items-center text-right text-sm leading-none relative top-[1px] truncate" title={resolveWalletAddress(walletDropdownChain) || 'Unknown'}>
+                <span
+                  className="flex h-full items-center text-right leading-none relative top-[1px] truncate"
+                  style={{
+                    fontSize: `${walletAddressButtonFontSize}px`,
+                    fontFamily: walletAddressButtonFontFamily,
+                    color: walletAddressButtonFontColor,
+                  }}
+                  title={resolveWalletAddress(walletDropdownChain) || 'Unknown'}
+                >
                   {formatDisplayAddress(resolveWalletAddress(walletDropdownChain))}
                 </span>
                 <span className="flex w-4 justify-start ml-2">

@@ -70,6 +70,14 @@ export function useUserSync() {
   useEffect(() => {
     if (!authenticated) return;
 
+    const hasHydratedUserId = typeof contactSnapshot.id === 'string' && contactSnapshot.id.length > 0;
+    const hasLinkedAccounts = contactSnapshot.linkedAccountCount > 0;
+    const hasWalletSignal = Boolean(contactSnapshot.walletAddress || evmWalletAddress || solanaWalletAddress);
+
+    // Avoid syncing partial auth state before Privy user identity has fully hydrated.
+    if (!hasHydratedUserId) return;
+    if (!hasLinkedAccounts && !hasWalletSignal) return;
+
     const syncKey = [
       contactSnapshot.id ?? 'unknown',
       contactSnapshot.walletAddress ?? '',
