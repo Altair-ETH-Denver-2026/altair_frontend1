@@ -1,5 +1,5 @@
 import { CHAINS, type ChainKey } from '../../config/blockchain_config';
-import { BASE_MAINNET, BASE_SEPOLIA, ETH_MAINNET, ETH_SEPOLIA, SOLANA_MAINNET } from '../../config/chain_info';
+import { BASE_MAINNET, BASE_SEPOLIA, ETH_MAINNET, ETH_SEPOLIA, SOLANA_MAINNET, SOLANA_DEVNET } from '../../config/chain_info';
 import * as BaseTokens from '../../config/token_info/base_tokens';
 import * as BaseSepoliaTokens from '../../config/token_info/base_testnet_sepolia_tokens';
 import * as EthTokens from '../../config/token_info/eth_tokens';
@@ -16,6 +16,7 @@ const chainIdByKey: Record<ChainKey, number> = {
   ETH_MAINNET: ETH_MAINNET.chainId,
   ETH_SEPOLIA: ETH_SEPOLIA.chainId,
   SOLANA_MAINNET: SOLANA_MAINNET.chainId ?? 792703809,
+  SOLANA_DEVNET: SOLANA_DEVNET.chainId ?? 901901901,
 };
 
 const buildTokenMap = (tokensModule: Record<string, TokenInfo>): Record<string, TokenInfo> => {
@@ -37,6 +38,7 @@ const tokenConfigs: Record<ChainKey, Record<string, TokenInfo>> = {
   ETH_MAINNET: buildTokenMap(EthTokens as Record<string, TokenInfo>),
   BASE_MAINNET: buildTokenMap(BaseTokens as Record<string, TokenInfo>),
   SOLANA_MAINNET: buildTokenMap(SolanaTokens as Record<string, TokenInfo>),
+  SOLANA_DEVNET: buildTokenMap(SolanaTokens as Record<string, TokenInfo>),
 };
 
 const normalizeChainKey = (input: string): ChainKey | null => {
@@ -59,6 +61,8 @@ const normalizeChainKey = (input: string): ChainKey | null => {
     basesepoliatestnet: 'BASE_SEPOLIA',
     solana: 'SOLANA_MAINNET',
     solanamainnet: 'SOLANA_MAINNET',
+    solanadevnet: 'SOLANA_DEVNET',
+    devnet: 'SOLANA_DEVNET',
   };
   if (aliasMap[normalized]) return aliasMap[normalized];
   const normalizedKey = raw.trim().toUpperCase();
@@ -77,7 +81,7 @@ export const resolveRelayToken = (chainKey: string, symbol: string) => {
   if (!normalizedKey) return null;
   const tokenMap = tokenConfigs[normalizedKey];
   const normalized = symbol.toUpperCase();
-  if (normalized === 'ETH' && normalizedKey !== 'SOLANA_MAINNET') {
+  if (normalized === 'ETH' && normalizedKey !== 'SOLANA_MAINNET' && normalizedKey !== 'SOLANA_DEVNET') {
     return { address: RELAY_NATIVE_TOKEN, decimals: 18, symbol: 'ETH' };
   }
   return tokenMap[normalized] ?? null;

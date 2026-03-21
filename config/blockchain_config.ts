@@ -21,6 +21,7 @@ export const CHAINS = {
   ETH_MAINNET: 'ETH_MAINNET', // Ethereum mainnet key for production swaps and portfolio data
   BASE_MAINNET: 'BASE_MAINNET', // Base mainnet key for production swaps and portfolio data
   SOLANA_MAINNET: 'SOLANA_MAINNET', // Solana mainnet key for Solana wallet, balances, and swap logic
+  SOLANA_DEVNET: 'SOLANA_DEVNET',
 } as const;
 
 export type ChainKey = keyof typeof CHAINS; // union type for every supported chain identifier in Altair
@@ -31,6 +32,7 @@ export const GAS_RESERVES = {
   ETH_MAINNET: '0.01',
   BASE_MAINNET: '0.0005',
   SOLANA_MAINNET: '0.02',
+  SOLANA_DEVNET: '0.01',
 };
 
 export const GAS_TOKENS = {
@@ -39,6 +41,7 @@ export const GAS_TOKENS = {
   ETH_MAINNET: 'ETH',
   BASE_MAINNET: 'ETH',
   SOLANA_MAINNET: 'SOL',
+  SOLANA_DEVNET: 'SOL',
 };
 
 export const FORCE_QUERY_CHAINS = {
@@ -50,10 +53,11 @@ export const FORCE_QUERY_CHAINS = {
   }
 };
 
-export const DEFAULT_TOKENS = {
+export const DEFAULT_TOKENS = { // These are added when a user creates their account
     ETH_MAINNET: ['ETH', 'WETH', 'WSOL', 'USDC', 'DAI'],
     ETH_SEPOLIA: ['ETH', 'WETH', 'WSOL', 'USDC', 'DAI'],
     BASE_MAINNET: ['ETH', 'WETH', 'WSOL', 'USDC', 'DAI'],
     BASE_SEPOLIA: ['ETH', 'WETH', 'WSOL', 'USDC', 'DAI'],
     SOLANA_MAINNET: ['SOL', 'WETH', 'WBTC', 'USDC', 'USDu'],
+    SOLANA_DEVNET: ['SOL', 'WETH', 'WBTC', 'USDC', 'USDu'],
 };
