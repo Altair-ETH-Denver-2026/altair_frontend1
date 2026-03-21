@@ -13,7 +13,8 @@ const chainConfigs = {
   BASE_MAINNET,
 } as const;
 
-type EvmChainKey = Exclude<ChainKey, 'SOLANA_MAINNET'>;
+type EvmChainKey = Exclude<ChainKey, 'SOLANA_MAINNET' | 'SOLANA_DEVNET'>;
+const isSolanaChain = (chainKey: ChainKey) => chainKey === 'SOLANA_MAINNET' || chainKey === 'SOLANA_DEVNET';
 
 let swapQueue: Promise<void> = Promise.resolve();
 
@@ -35,7 +36,7 @@ const ensureEvmChain = async (
   ethereumProvider: ethers.Eip1193Provider,
   chainKey: ChainKey,
 ) => {
-  if (chainKey === 'SOLANA_MAINNET') {
+  if (isSolanaChain(chainKey)) {
     throw new Error('Solana is not supported by the EVM swap flow.');
   }
   const chainConfig = chainConfigs[chainKey as EvmChainKey];
@@ -44,12 +45,12 @@ const ensureEvmChain = async (
   const resolvedRpcUrls = resolveRpcUrls(chainConfig.rpcUrls);
   console.log('[RPC] ensureEvmChain resolvedRpcUrls:', resolvedRpcUrls);
   const targetChainId = `0x${chainConfig.chainId.toString(16)}`;
-  const chainMeta: Record<EvmChainKey, { name: string; explorer: string }> = {
-    ETH_MAINNET: { name: 'Ethereum Mainnet', explorer: 'https://etherscan.io' },
-    ETH_SEPOLIA: { name: 'Sepolia', explorer: 'https://sepolia.etherscan.io' },
-    BASE_MAINNET: { name: 'Base Mainnet', explorer: 'https://basescan.org' },
-    BASE_SEPOLIA: { name: 'Base Sepolia', explorer: 'https://sepolia.basescan.org' },
-  };
+  const chainName = typeof chainConfig.name === 'string' && chainConfig.name.trim().length > 0
+    ? chainConfig.name
+    : chainKey;
+  const explorerUrl = typeof chainConfig.explorerUrl === 'string' && chainConfig.explorerUrl.trim().length > 0
+    ? chainConfig.explorerUrl
+    : undefined;
 
   try {
     await ethereumProvider.request?.({
@@ -69,10 +70,10 @@ const ensureEvmChain = async (
         params: [
           {
             chainId: targetChainId,
-            chainName: chainMeta[chainKey as EvmChainKey].name,
+            chainName,
             nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 },
             rpcUrls: resolvedRpcUrls,
-            blockExplorerUrls: [chainMeta[chainKey as EvmChainKey].explorer],
+            blockExplorerUrls: explorerUrl ? [explorerUrl] : [],
           },
         ],
       });
@@ -94,7 +95,7 @@ export const useSwap = (explicitChain?: ChainKey) => {
 
       const selectedChain = resolveSelectedChain(explicitChain);
       console.log('[RPC] selectedChain:', selectedChain);
-      if (selectedChain === 'SOLANA_MAINNET') {
+      if (isSolanaChain(selectedChain)) {
         throw new Error('Solana is not supported by useSwap. Use useSolanaSwap instead.');
       }
       const evmChain = selectedChain as EvmChainKey;

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { ethers } from 'ethers';
 import { usePrivy, useWallets } from '@privy-io/react-auth';
 import { useWallets as useSolanaWallets, useSignAndSendTransaction } from '@privy-io/react-auth/solana';
@@ -16,7 +16,7 @@ import WalletPanel from './panels/WalletPanel';
 import AddPanel from './panels/AddPanel';
 import { useEffect as useClientEffect } from 'react';
 import { BLOCKCHAIN, CHAINS, GAS_RESERVES, GAS_TOKENS, FORCE_QUERY_CHAINS, type ChainKey } from '../../config/blockchain_config';
-import { BASE_MAINNET, BASE_SEPOLIA, ETH_MAINNET, ETH_SEPOLIA, SOLANA_MAINNET, resolveRpcUrls } from '../../config/chain_info';
+import { BASE_MAINNET, BASE_SEPOLIA, ETH_MAINNET, ETH_SEPOLIA, SOLANA_MAINNET, SOLANA_DEVNET, resolveRpcUrls } from '../../config/chain_info';
 import * as BaseTokens from '../../config/token_info/base_tokens';
 import * as BaseSepoliaTokens from '../../config/token_info/base_testnet_sepolia_tokens';
 import * as EthTokens from '../../config/token_info/eth_tokens';
@@ -24,7 +24,15 @@ import * as EthSepoliaTokens from '../../config/token_info/eth_sepolia_testnet_t
 import * as SolanaTokens from '../../config/token_info/solana_tokens';
 import type { ApiChainBalances, ApiTokenBalance } from '../../config/balance_types';
 import { normalizeBalancesResponse, resolveTokenRowsForChain } from '../lib/balanceTransforms';
-import { ADD_PANEL_DISPLAY, BALANCE_DECIMALS, MENU_ICONS, WALLET_CHAIN_LABELS, WALLET_CHAIN_OPTIONS, WALLET_DISPLAY } from '../../config/ui_config';
+import { ADD_PANEL_DISPLAY, BALANCE_DECIMALS, CHAIN_OPTIONS, MENU_ICONS, WALLET_DISPLAY } from '../../config/ui_config';
+
+type UiChainKey = ChainKey | 'ALL';
+type ChainOptionConfig = {
+  enabled: boolean;
+  isTestnet: boolean;
+  activeNetwork: { dropdownLabel: string | false; selectedLabel: string | false };
+  walletDisplay: { dropdownLabel: string | false; selectedLabel: string | false };
+};
 
 export default function UserMenu() {
   const { logout, authenticated, getAccessToken } = usePrivy();
@@ -79,9 +87,8 @@ export default function UserMenu() {
   const menuRef = useRef<HTMLDivElement>(null);
   const isWalletDropDown = WALLET_DISPLAY.active === 'drop_down';
   const isWalletPanel = WALLET_DISPLAY.active === 'panel';
-  const chainLabels: Record<ChainKey, string> = WALLET_CHAIN_LABELS;
   const solanaDisplayAddress = solanaAddress || solanaWallets[0]?.address || '';
-  const displayAddress = selectedChain === 'SOLANA_MAINNET' ? solanaDisplayAddress : evmAddress;
+  const displayAddress = selectedChain === 'SOLANA_MAINNET' || selectedChain === 'SOLANA_DEVNET' ? solanaDisplayAddress : evmAddress;
   const buttonSize = WALLET_DISPLAY.buttonSize;
   const buttonPaddingX = WALLET_DISPLAY.buttonWidth * buttonSize;
   const buttonHeight = WALLET_DISPLAY.buttonHeight * buttonSize;
@@ -167,14 +174,74 @@ export default function UserMenu() {
   const menuButtonTextFontSize = Number(menuButtonTextConfig.fontSize ?? 13);
   const menuButtonTextFontFamily = menuButtonTextConfig.fontName ?? 'sans-serif';
   const menuButtonTextFontColor = menuButtonTextConfig.fontColor ?? '#f3f4f6';
-  const networkOptions: ReadonlyArray<{ label: string; key: ChainKey }> = [
-    { label: 'ETH Mainnet', key: 'ETH_MAINNET' },
-    { label: 'Sepolia Testnet', key: 'ETH_SEPOLIA' },
-    { label: 'Base Mainnet', key: 'BASE_MAINNET' },
-    { label: 'Base Testnet', key: 'BASE_SEPOLIA' },
-    { label: 'Solana Mainnet', key: 'SOLANA_MAINNET' },
-  ];
-  const selectedNetworkLabel = networkOptions.find((option) => option.key === selectedChain)?.label ?? 'Network';
+  const {
+    activeNetworkOptions,
+    walletChainOptions,
+    activeSelectedLabelByKey,
+    walletSelectedLabelByKey,
+  } = useMemo(() => {
+    const includeTestnets = CHAIN_OPTIONS.enableTestnets !== false;
+    const includeMainnets = CHAIN_OPTIONS.enableMainnets !== false;
+    const rawEntries = Object.entries(CHAIN_OPTIONS)
+      .filter(([key]) => key !== 'enableTestnets' && key !== 'enableMainnets')
+      .flatMap(([rawKey, value]) => {
+        const uiKey: UiChainKey | null = rawKey === 'ALL_CHAINS'
+          ? 'ALL'
+          : (rawKey in CHAINS ? (rawKey as ChainKey) : null);
+        if (!uiKey) return [];
+        return [{ key: uiKey, config: value as ChainOptionConfig }];
+      });
+
+    const visibleEntries = rawEntries.filter(({ key, config }) => {
+      if (!config?.enabled) return false;
+      if (key === 'ALL') return true;
+      if (config.isTestnet) return includeTestnets;
+      return includeMainnets;
+    });
+
+    const nextActiveSelectedLabelByKey: Partial<Record<ChainKey, string>> = {};
+    const nextWalletSelectedLabelByKey: Partial<Record<UiChainKey, string>> = {};
+
+    const nextActiveNetworkOptions = visibleEntries
+      .filter(({ key, config }) => key !== 'ALL' && typeof config.activeNetwork?.dropdownLabel === 'string')
+      .map(({ key, config }) => {
+        const dropdownLabel = config.activeNetwork.dropdownLabel as string;
+        const selectedLabel = typeof config.activeNetwork.selectedLabel === 'string'
+          ? config.activeNetwork.selectedLabel
+          : dropdownLabel;
+        nextActiveSelectedLabelByKey[key as ChainKey] = selectedLabel;
+        return { key: key as ChainKey, label: dropdownLabel };
+      });
+
+    const nextWalletChainOptions = visibleEntries
+      .filter(({ config }) => typeof config.walletDisplay?.dropdownLabel === 'string')
+      .map(({ key, config }) => {
+        const dropdownLabel = config.walletDisplay.dropdownLabel as string;
+        const selectedLabel = typeof config.walletDisplay.selectedLabel === 'string'
+          ? config.walletDisplay.selectedLabel
+          : dropdownLabel;
+        nextWalletSelectedLabelByKey[key] = selectedLabel;
+        return { key, label: dropdownLabel };
+      });
+
+    return {
+      activeNetworkOptions: nextActiveNetworkOptions,
+      walletChainOptions: nextWalletChainOptions,
+      activeSelectedLabelByKey: nextActiveSelectedLabelByKey,
+      walletSelectedLabelByKey: nextWalletSelectedLabelByKey,
+    };
+  }, []);
+  const selectedNetworkLabel = activeSelectedLabelByKey[selectedChain]
+    ?? activeNetworkOptions.find((option) => option.key === selectedChain)?.label
+    ?? 'Network';
+  const walletChainKeySet = useMemo(() => new Set<UiChainKey>(walletChainOptions.map((option) => option.key)), [walletChainOptions]);
+  const fallbackWalletChain = useMemo<UiChainKey>(() => {
+    if (walletChainKeySet.has('ALL')) return 'ALL';
+    if (walletChainKeySet.has(selectedChain)) return selectedChain;
+    return walletChainOptions[0]?.key ?? 'ALL';
+  }, [walletChainKeySet, selectedChain, walletChainOptions]);
+  const gasTokensByChain = GAS_TOKENS as Partial<Record<ChainKey, string>>;
+  const gasReservesByChain = GAS_RESERVES as Partial<Record<ChainKey, string>>;
   const walletAddressButtonConfig = WALLET_DISPLAY.walletAddressButton ?? {
     activeDuration: 1.5,
     fontSize: 14,
@@ -411,17 +478,17 @@ export default function UserMenu() {
     }
     const cachedAddress = typeof window !== 'undefined' ? localStorage.getItem(cachedEvmKey) : null;
     const cachedSolana = typeof window !== 'undefined' ? localStorage.getItem(cachedSolKey) : null;
-    const solanaAddressValue = chainKey === 'SOLANA_MAINNET'
+    const solanaAddressValue = chainKey === 'SOLANA_MAINNET' || chainKey === 'SOLANA_DEVNET'
       ? solanaWallets[0]?.address ?? cachedSolana ?? null
       : null;
 
-    if (chainKey === 'SOLANA_MAINNET') {
+    if (chainKey === 'SOLANA_MAINNET' || chainKey === 'SOLANA_DEVNET') {
       if (!solanaAddressValue) return;
     } else if (!token && !cachedAddress) {
       return;
     }
 
-    const cacheKey = `cached:balances:${chainKey}:${chainKey === 'SOLANA_MAINNET' ? solanaAddressValue : cachedAddress ?? 'unknown'}`;
+    const cacheKey = `cached:balances:${chainKey}:${chainKey === 'SOLANA_MAINNET' || chainKey === 'SOLANA_DEVNET' ? solanaAddressValue : cachedAddress ?? 'unknown'}`;
     
     // Step 1: Always try to load cached balances for immediate UI display
     let cacheHit = false;
@@ -452,7 +519,7 @@ export default function UserMenu() {
             body: JSON.stringify({
               ...(token ? { accessToken: token } : {}),
               chain: chainKey,
-              walletAddress: chainKey === 'SOLANA_MAINNET' ? solanaAddressValue ?? undefined : cachedAddress ?? undefined,
+              walletAddress: chainKey === 'SOLANA_MAINNET' || chainKey === 'SOLANA_DEVNET' ? solanaAddressValue ?? undefined : cachedAddress ?? undefined,
             }),
           })
       );
@@ -631,7 +698,8 @@ export default function UserMenu() {
     };
 
     const preloadAllChainsOnLogin = async () => {
-      const chainKeys = Object.keys(CHAINS) as ChainKey[];
+      const chainKeys = activeNetworkOptions.map((option) => option.key);
+      if (chainKeys.length === 0) return;
       await Promise.all(
         chainKeys.map(async (chainKey) => {
           await run({ forceRefresh: false, chainKey });
@@ -675,7 +743,7 @@ export default function UserMenu() {
         
         // Get addresses for affected chains and mark cache stale
         affectedChains.forEach(chainKey => {
-          if (chainKey === 'SOLANA_MAINNET') {
+          if (chainKey === 'SOLANA_MAINNET' || chainKey === 'SOLANA_DEVNET') {
             const solanaAddress = solanaWallets[0]?.address ??
               (typeof window !== 'undefined' ? localStorage.getItem(cachedSolKey) : null);
             if (solanaAddress) {
@@ -705,7 +773,35 @@ export default function UserMenu() {
         window.removeEventListener('altair:wallet-open', handleWalletOpen);
       }
     };
-  }, [authenticated, selectedChain, wallets, solanaWallets]);
+  }, [authenticated, selectedChain, wallets, solanaWallets, activeNetworkOptions]);
+
+  useEffect(() => {
+    if (!activeNetworkOptions.some((option) => option.key === selectedChain)) {
+      const fallback = activeNetworkOptions[0]?.key;
+      if (fallback) {
+        setSelectedChain(fallback);
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('selectedChain', fallback);
+        }
+      }
+    }
+  }, [activeNetworkOptions, selectedChain]);
+
+  useEffect(() => {
+    if (!walletChainKeySet.has(walletDropdownChain)) {
+      setWalletDropdownChain(fallbackWalletChain);
+    }
+    if (!walletChainKeySet.has(addPanelChain)) {
+      setAddPanelChain(fallbackWalletChain);
+    }
+    setWalletPanels((current) =>
+      current.map((panel) =>
+        walletChainKeySet.has(panel.chainKey)
+          ? panel
+          : { ...panel, chainKey: fallbackWalletChain }
+      )
+    );
+  }, [walletChainKeySet, walletDropdownChain, addPanelChain, fallbackWalletChain, setAddPanelChain, setWalletPanels]);
 
   if (!authenticated) return null;
 
@@ -716,18 +812,14 @@ export default function UserMenu() {
     }, 6000);
   };
 
-  const walletChainOptions = WALLET_CHAIN_OPTIONS;
   const resolveWalletTitle = (chainKey: ChainKey | 'ALL') => {
-    if (chainKey === 'ALL') return 'ALL CHAINS ▼';
-    if (chainKey === 'ETH_SEPOLIA' || chainKey === 'BASE_SEPOLIA') {
-      return `${chainLabels[chainKey].toUpperCase()} ▼`;
-    }
-    return `${chainLabels[chainKey].toUpperCase()} WALLET ▼`;
+    const base = walletSelectedLabelByKey[chainKey] ?? walletChainOptions.find((option) => option.key === chainKey)?.label ?? 'All Chains';
+    return `${base} ▼`;
   };
   const resolveWalletAddress = (chainKey: ChainKey | 'ALL') => {
     if (chainKey === 'ALL') return '';
     const snapshot = balancesByChain[chainKey as ChainKey];
-    if (chainKey === 'SOLANA_MAINNET') return snapshot?.solanaAddress ?? solanaDisplayAddress;
+    if (chainKey === 'SOLANA_MAINNET' || chainKey === 'SOLANA_DEVNET') return snapshot?.solanaAddress ?? solanaDisplayAddress;
     return snapshot?.address ?? evmAddress;
   };
   const resolveBalanceForSymbol = (chainKey: ChainKey | 'ALL', symbol: string) => {
@@ -764,6 +856,7 @@ export default function UserMenu() {
       ETH_MAINNET,
       BASE_MAINNET,
       SOLANA_MAINNET,
+      SOLANA_DEVNET,
     } as const;
     const chainConfig = chainConfigs[chainKey];
     if (!chainConfig || !('rpcUrls' in chainConfig)) return null;
@@ -789,10 +882,11 @@ export default function UserMenu() {
       ETH_MAINNET: buildTokenMap(EthTokens as Record<string, { address?: string; decimals?: number; symbol?: string }>),
       BASE_MAINNET: buildTokenMap(BaseTokens as Record<string, { address?: string; decimals?: number; symbol?: string }>),
       SOLANA_MAINNET: buildTokenMap(SolanaTokens as Record<string, { address?: string; decimals?: number; symbol?: string }>),
+      SOLANA_DEVNET: buildTokenMap(SolanaTokens as Record<string, { address?: string; decimals?: number; symbol?: string }>),
     };
     return tokenConfigs[chainKey];
   };
-  const isSolanaChain = (chainKey: ChainKey | 'ALL') => chainKey === 'SOLANA_MAINNET';
+  const isSolanaChain = (chainKey: ChainKey | 'ALL') => chainKey === 'SOLANA_MAINNET' || chainKey === 'SOLANA_DEVNET';
   const sendEvmTransfer = async (params: {
     chainKey: ChainKey;
     recipient: string;
@@ -804,7 +898,7 @@ export default function UserMenu() {
     if (!rpcUrl) throw new Error('Missing RPC URL for chain.');
     const tokenMap = getTokenConfigMap(params.chainKey);
     const normalizedSymbol = params.tokenSymbol.toUpperCase();
-    const gasToken = GAS_TOKENS[params.chainKey];
+    const gasToken = gasTokensByChain[params.chainKey];
     const wallet = wallets[0];
     const ethereumProvider = await wallet.getEthereumProvider();
     const provider = new ethers.BrowserProvider(ethereumProvider);
@@ -864,7 +958,7 @@ export default function UserMenu() {
   const isValidRecipientAddress = (chainKey: ChainKey | 'ALL', address: string) => {
     const trimmed = address.trim();
     if (!trimmed || chainKey === 'ALL') return false;
-    if (chainKey === 'SOLANA_MAINNET') {
+    if (chainKey === 'SOLANA_MAINNET' || chainKey === 'SOLANA_DEVNET') {
       try {
         const pubkey = new PublicKey(trimmed);
         return PublicKey.isOnCurve(pubkey.toBuffer());
@@ -1062,8 +1156,8 @@ export default function UserMenu() {
     const normalizedToken = selectedToken.trim().toUpperCase();
     const chainKey = (walletPanels.find((panel) => panel.id === panelId)?.chainKey ?? 'ALL') as ChainKey | 'ALL';
     const chainKeyNormalized = chainKey === 'ALL' ? null : chainKey;
-    const gasToken = chainKeyNormalized ? GAS_TOKENS[chainKeyNormalized] : null;
-    const reserve = chainKeyNormalized ? Number(GAS_RESERVES[chainKeyNormalized] ?? 0) : 0;
+    const gasToken = chainKeyNormalized ? gasTokensByChain[chainKeyNormalized] ?? null : null;
+    const reserve = chainKeyNormalized ? Number(gasReservesByChain[chainKeyNormalized] ?? 0) : 0;
     const balanceValue = resolveBalanceForSymbol(chainKey, normalizedToken);
     const balanceNumber = Number(balanceValue);
     const isGasToken = gasToken && normalizedToken === gasToken;
@@ -1265,10 +1359,10 @@ export default function UserMenu() {
           }));
           return;
         }
-        const gasToken = GAS_TOKENS[chainKey] ?? null;
+        const gasToken = gasTokensByChain[chainKey] ?? null;
         if (gasToken) {
           console.log('[UserMenu] gasToken', gasToken);
-          const reserve = Number(GAS_RESERVES[chainKey] ?? 0);
+          const reserve = Number(gasReservesByChain[chainKey] ?? 0);
           console.log('[UserMenu] reserve', reserve);
           const gasBalanceValue = resolveBalanceForSymbol(chainKey, gasToken);
           console.log('[UserMenu] gasBalanceValue', gasBalanceValue);
@@ -1283,7 +1377,7 @@ export default function UserMenu() {
             clearWithdrawReceipt(panel.id);
             setWithdrawErrors((prev) => ({
               ...prev,
-              [panel.id]: chainKey === 'SOLANA_MAINNET'
+              [panel.id]: chainKey === 'SOLANA_MAINNET' || chainKey === 'SOLANA_DEVNET'
                 ? 'Insufficient SOL to pay gas fee'
                 : 'Insufficient ETH to pay gas fee',
             }));
@@ -1293,7 +1387,7 @@ export default function UserMenu() {
             clearWithdrawReceipt(panel.id);
             setWithdrawErrors((prev) => ({
               ...prev,
-              [panel.id]: chainKey === 'SOLANA_MAINNET'
+              [panel.id]: chainKey === 'SOLANA_MAINNET' || chainKey === 'SOLANA_DEVNET'
                 ? 'Insufficient SOL to pay gas fee'
                 : 'Insufficient ETH to pay gas fee',
             }));
@@ -1305,7 +1399,7 @@ export default function UserMenu() {
           setWithdrawErrors((prev) => ({ ...prev, [panel.id]: 'No recipient address' }));
           return;
         }
-        if (chainKey === 'SOLANA_MAINNET') {
+        if (chainKey === 'SOLANA_MAINNET' || chainKey === 'SOLANA_DEVNET') {
           try {
             new PublicKey(address);
           } catch {
@@ -1463,7 +1557,7 @@ export default function UserMenu() {
         </button>
         {isNetworkOpen && (
           <div className="absolute right-0 mt-3 w-48 rounded-xl bg-gray-900 border border-gray-700 shadow-2xl z-[100] overflow-hidden flex flex-col">
-            {networkOptions.map(({ label, key }) => {
+            {activeNetworkOptions.map(({ label, key }) => {
               const isSelected = key ? selectedChain === key : false;
               const handleClick = () => {
                 setSelectedChain(key);
