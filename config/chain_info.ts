@@ -13,12 +13,23 @@
 // ⚠️⚠️⚠️ END WARNING ⚠️⚠️⚠️
 
 export const ALCHEMY_API_KEY_PLACEHOLDER = 'NEXT_PUBLIC_ALCHEMY_API_KEY'; // placeholder token injected into RPC URLs to pull the Alchemy key at runtime
+export const HELIUS_API_KEY_PLACEHOLDER = 'NEXT_PUBLIC_HELIUS_API_KEY'; // placeholder token injected into Solana RPC URLs to pull the Helius key at runtime
 
 export const resolveRpcUrls = (rpcUrls: string[]) => {
-  const apiKey = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY; // reads the browser-safe Alchemy key for blockchain RPC access
+  const alchemyApiKey = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY; // reads the browser-safe Alchemy key for blockchain RPC access
+  const heliusApiKey = process.env.NEXT_PUBLIC_HELIUS_API_KEY; // reads the browser-safe Helius key for Solana RPC access
   const resolved = rpcUrls
-    .map((url) => (apiKey ? url.replace(ALCHEMY_API_KEY_PLACEHOLDER, apiKey) : url)) // substitutes the key so Altair can connect to the configured chain
-    .filter((url) => !url.includes(ALCHEMY_API_KEY_PLACEHOLDER)); // drops URLs that still require a missing key to avoid broken RPC calls
+    .map((url) => {
+      let next = url;
+      if (alchemyApiKey) {
+        next = next.replace(ALCHEMY_API_KEY_PLACEHOLDER, alchemyApiKey);
+      }
+      if (heliusApiKey) {
+        next = next.replace(HELIUS_API_KEY_PLACEHOLDER, heliusApiKey);
+      }
+      return next;
+    }) // substitutes configured provider keys so Altair can connect to configured chains
+    .filter((url) => !url.includes(ALCHEMY_API_KEY_PLACEHOLDER) && !url.includes(HELIUS_API_KEY_PLACEHOLDER)); // drops URLs that still require missing keys to avoid broken RPC calls
   console.log('[RPC] resolveRpcUrls input:', rpcUrls); // debug log for RPC inputs used by chain config
   console.log('[RPC] resolveRpcUrls output:', resolved); // debug log for resolved RPC endpoints
   return resolved; // returns usable RPC URLs for the swap/balance pipelines
@@ -93,6 +104,7 @@ export const SOLANA_MAINNET = {
   isTestnet: false,
   chainId: 792703809,
   rpcUrls: [
+    `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY_PLACEHOLDER}`,
     'https://api.mainnet-beta.solana.com/', // Solana mainnet RPC for wallet, balances, and swap routes
   ],
   explorerUrl: 'https://solscan.io', // block explorer base URL for Solana transactions

@@ -24,7 +24,7 @@ import * as EthSepoliaTokens from '../../config/token_info/eth_sepolia_testnet_t
 import * as SolanaTokens from '../../config/token_info/solana_tokens';
 import type { ApiChainBalances, ApiTokenBalance } from '../../config/balance_types';
 import { normalizeBalancesResponse, resolveTokenRowsForChain } from '../lib/balanceTransforms';
-import { ADD_PANEL_DISPLAY, BALANCE_DECIMALS, CHAIN_OPTIONS, MENU_ICONS, WALLET_DISPLAY } from '../../config/ui_config';
+import { ACTIVE_NETWORK_DROPDOWN, ADD_PANEL_DISPLAY, BALANCE_DECIMALS, CHAIN_OPTIONS, MENU_ICONS, WALLET_DISPLAY } from '../../config/ui_config';
 
 type UiChainKey = ChainKey | 'ALL';
 type ChainOptionConfig = {
@@ -519,6 +519,7 @@ export default function UserMenu() {
             body: JSON.stringify({
               ...(token ? { accessToken: token } : {}),
               chain: chainKey,
+              ...(forceRefresh ? { forceRefresh: true } : {}),
               walletAddress: chainKey === 'SOLANA_MAINNET' || chainKey === 'SOLANA_DEVNET' ? solanaAddressValue ?? undefined : cachedAddress ?? undefined,
             }),
           })
@@ -755,6 +756,12 @@ export default function UserMenu() {
               markCacheAsStale(chainKey, evmAddress);
             }
           }
+        });
+
+        // Force-refresh every affected chain for durable reconciliation,
+        // independent of currently selectedChain.
+        affectedChains.forEach((chainKey) => {
+          void run({ forceRefresh: true, chainKey });
         });
       }
 
@@ -1284,6 +1291,7 @@ export default function UserMenu() {
       setIsMaxHovering={setIsMaxHovering}
       onMaxClick={handleMaxClick}
       resolveTxUrl={resolveTxUrl}
+      getCryptoLink={WALLET_DISPLAY.getCrypto.link}
       onClose={() => {
         closeWalletPanel(panel.id, () => {
           setIsWalletPanelOpen(false);
@@ -1556,7 +1564,13 @@ export default function UserMenu() {
           </span>
         </button>
         {isNetworkOpen && (
-          <div className="absolute right-0 mt-3 w-48 rounded-xl bg-gray-900 border border-gray-700 shadow-2xl z-[100] overflow-hidden flex flex-col">
+          <div
+            className="absolute right-0 mt-3 rounded-xl border border-gray-700 shadow-2xl z-[100] overflow-hidden flex flex-col"
+            style={{
+              width: `${ACTIVE_NETWORK_DROPDOWN.width}px`,
+              backgroundColor: ACTIVE_NETWORK_DROPDOWN.itemColor,
+            }}
+          >
             {activeNetworkOptions.map(({ label, key }) => {
               const isSelected = key ? selectedChain === key : false;
               const handleClick = () => {
@@ -1570,7 +1584,20 @@ export default function UserMenu() {
                 <button
                   key={label}
                   onClick={handleClick}
-                  className="flex w-full items-center px-4 py-3 text-sm text-gray-300 hover:bg-gray-800 transition-colors text-left cursor-pointer"
+                  className="flex w-full items-center px-4 transition-colors text-left cursor-pointer"
+                  style={{
+                    height: `${ACTIVE_NETWORK_DROPDOWN.itemHeight}px`,
+                    fontSize: `${ACTIVE_NETWORK_DROPDOWN.fontSize}px`,
+                    fontFamily: ACTIVE_NETWORK_DROPDOWN.fontName,
+                    color: ACTIVE_NETWORK_DROPDOWN.fontColor,
+                    backgroundColor: 'transparent',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = ACTIVE_NETWORK_DROPDOWN.itemHighlightColor;
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = 'transparent';
+                  }}
                 >
                   <span className="mr-3 w-4 flex justify-center">{isSelected ? <Check className="w-4 h-4 text-white" /> : null}</span>
                   <span className="flex-1">{label}</span>
@@ -1721,18 +1748,21 @@ export default function UserMenu() {
               >
                 Withdraw
               </button>
-              <button
-                type="button"
-                className="flex items-center justify-center rounded-lg border border-gray-700 bg-gray-800/60 text-gray-100 hover:border-gray-500 hover:bg-gray-800 transition-colors cursor-pointer"
+              <a
+                href={WALLET_DISPLAY.getCrypto.link}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center justify-center rounded-lg border border-gray-700 bg-gray-800/60 text-gray-100 hover:border-gray-500 hover:bg-gray-800 transition-colors cursor-pointer no-underline"
                 style={{
                   height: `${buttonHeight}px`,
                   paddingLeft: `${buttonPaddingX}px`,
                   paddingRight: `${buttonPaddingX}px`,
                   fontSize: `${buttonFontSize}px`,
+                  textDecoration: 'none',
                 }}
               >
                 Get Crypto
-              </button>
+              </a>
             </div>
             <div className="h-[1px] bg-gray-700 w-full" />
             <div

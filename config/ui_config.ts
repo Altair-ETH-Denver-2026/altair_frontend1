@@ -1,3 +1,5 @@
+import { AFFILIATE_LINKS } from './external_links';
+
 export const BALANCE_DECIMALS = 8; // Token balance display precision used in renderBalances in altair_frontend1/src/components/UserMenu.tsx
 export const LOGO_SPIN_MIN_MS = 400; // Min logo spin duration used by logo animation logic (see altair_frontend1/src/components/SpinningLogo.tsx)
 export const LOGO_SPIN_MAX_MS = 2000; // Max logo spin duration used by logo animation logic (see altair_frontend1/src/components/SpinningLogo.tsx)
@@ -11,6 +13,16 @@ export const PANEL_DISPLAY = {
     opacity: 75,
   },
 };
+
+export const ACTIVE_NETWORK_DROPDOWN = {
+  width: 240, // w-48 = 48 * 4 = 192px (Tailwind w-48 = 12rem = 192px)
+  fontSize: 14, // text-sm = 14px
+  fontName: 'sans-serif', // default font
+  fontColor: '#d1d5db', // text-gray-300
+  itemColor: '#101828', // bg-gray-900
+  itemHighlightColor: '#1f2937', // hover:bg-gray-800
+  itemHeight: 48, // py-3 = 12px top + bottom, estimated total height
+}
 
 export const WALLET_DISPLAY = { // Wallet panel/dropdown sizing and typography config consumed in altair_frontend1/src/components/UserMenu.tsx
   logo: true,
@@ -74,6 +86,9 @@ export const WALLET_DISPLAY = { // Wallet panel/dropdown sizing and typography c
     width: 124,
     fontSize: 12,
     fontName: 'sans-serif',
+  },
+  getCrypto: {
+    link: AFFILIATE_LINKS.Coinbase
   },
   withdraw: {
     symbolInput: {
@@ -160,7 +175,7 @@ export const CHAIN_OPTIONS = {
       selectedLabel: 'Ethereum Sepolia Testnet',
     },
     walletDisplay: {
-      dropdownLabel: 'Ethereum Sepolia Testnet',
+      dropdownLabel: 'Ethereum Testnet',
       selectedLabel: 'Ethereum Testnet',
     }
   },
@@ -188,7 +203,7 @@ export const CHAIN_OPTIONS = {
       selectedLabel: 'Base Sepolia Testnet',
     },
     walletDisplay: {
-      dropdownLabel: 'Base Sepolia Testnet',
+      dropdownLabel: 'Base Testnet',
       selectedLabel: 'Base Testnet',
     }
   },
