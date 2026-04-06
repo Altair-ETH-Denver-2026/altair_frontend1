@@ -93,6 +93,7 @@ type WalletPanelProps = {
   setIsMaxHovering: (next: boolean) => void;
   onMaxClick: (panelId: number) => void;
   resolveTxUrl: (panelId: number, chainKey: ChainKey | 'ALL') => string;
+  getCryptoLink: string;
   onClose: () => void;
   onSubmitWithdraw: () => void;
   renderBalances: (chainKey: ChainKey | 'ALL') => React.ReactNode;
@@ -186,6 +187,7 @@ export default function WalletPanel({
   setIsMaxHovering,
   onMaxClick,
   resolveTxUrl,
+  getCryptoLink,
   onClose,
   onSubmitWithdraw,
   renderBalances,
@@ -391,9 +393,11 @@ export default function WalletPanel({
                   ) : null}
                 </div>
               ) : (
-                <button
-                  type="button"
-                  className="flex items-center justify-center rounded-lg border text-gray-100 transition-colors cursor-pointer"
+                <a
+                  href={getCryptoLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-center rounded-lg border text-gray-100 transition-colors cursor-pointer no-underline"
                   onMouseEnter={(event) => {
                     event.currentTarget.style.backgroundColor = topRowButtonHighlightColor;
                     event.currentTarget.style.borderColor = topRowButtonHighlightBorderColor;
@@ -409,10 +413,11 @@ export default function WalletPanel({
                     fontSize: `${buttonFontSize}px`,
                     backgroundColor: topRowButtonColor,
                     borderColor: topRowButtonBorderColor,
+                    textDecoration: 'none',
                   }}
                 >
                   Get Crypto
-                </button>
+                </a>
               )}
             </>
           );

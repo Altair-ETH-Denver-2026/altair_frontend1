@@ -311,7 +311,25 @@ export const useRelay = () => {
     );
   };
 
+  const isTransientRelayEvmTransportError = (err: unknown) => {
+    const message = err instanceof Error ? err.message : String(err);
+    const normalized = message.toLowerCase();
+    return (
+      normalized.includes('timeout') ||
+      normalized.includes('timed out') ||
+      normalized.includes('network error') ||
+      normalized.includes('failed to fetch') ||
+      normalized.includes('429') ||
+      normalized.includes('too many requests') ||
+      normalized.includes('gateway timeout') ||
+      normalized.includes('temporarily unavailable') ||
+      normalized.includes('internal json-rpc error')
+    );
+  };
+
   const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  const randomJitter = (max = 250) => Math.floor(Math.random() * Math.max(1, max));
 
   const parseHexToBigInt = (value: unknown): bigint | null => {
     if (typeof value !== 'string') return null;
@@ -434,6 +452,67 @@ export const useRelay = () => {
     console.warn('[Relay] EVM failure diagnostics', diagnostics);
   };
 
+  const runRelayEvmPreflight = async (params: {
+    ethereumProvider: { request?: (args: { method: string; params?: unknown[] }) => Promise<unknown> };
+    chainId: number;
+    tx: { from?: string | null; to: string; data: string; value: string };
+  }): Promise<{ ok: true } | { ok: false; retryableQuote: boolean; reason: string }> => {
+    const { ethereumProvider, chainId, tx } = params;
+
+    const walletChainIdRaw = await ethereumProvider.request?.({ method: 'eth_chainId' });
+    const walletChainId = typeof walletChainIdRaw === 'string' ? Number.parseInt(walletChainIdRaw, 16) : Number.NaN;
+    if (!Number.isFinite(walletChainId) || walletChainId <= 0 || walletChainId !== chainId) {
+      return {
+        ok: false,
+        retryableQuote: false,
+        reason: `Wallet is on chain ${String(walletChainIdRaw)} but Relay step requires chainId ${chainId}.`,
+      };
+    }
+
+    if (tx.from) {
+      const [latestNonce, pendingNonce] = await Promise.all([
+        ethereumProvider.request?.({ method: 'eth_getTransactionCount', params: [tx.from, 'latest'] }),
+        ethereumProvider.request?.({ method: 'eth_getTransactionCount', params: [tx.from, 'pending'] }),
+      ]);
+      console.log('[Relay] EVM preflight nonce snapshot', {
+        chainId,
+        from: tx.from,
+        latestNonce,
+        pendingNonce,
+      });
+    }
+
+    try {
+      await ethereumProvider.request?.({
+        method: 'eth_estimateGas',
+        params: [{ from: tx.from, to: tx.to, data: tx.data, value: tx.value }],
+      });
+    } catch (estimateErr) {
+      const reason = estimateErr instanceof Error ? estimateErr.message : String(estimateErr);
+      return {
+        ok: false,
+        retryableQuote: isRetryableRelayEvmError(estimateErr),
+        reason: `Relay preflight estimateGas failed: ${reason}`,
+      };
+    }
+
+    try {
+      await ethereumProvider.request?.({
+        method: 'eth_call',
+        params: [{ from: tx.from, to: tx.to, data: tx.data, value: tx.value }, 'latest'],
+      });
+    } catch (callErr) {
+      const reason = callErr instanceof Error ? callErr.message : String(callErr);
+      return {
+        ok: false,
+        retryableQuote: isRetryableRelayEvmError(callErr),
+        reason: `Relay preflight eth_call failed: ${reason}`,
+      };
+    }
+
+    return { ok: true };
+  };
+
   return async (intent: RelayIntent, cid?: string | null) => {
     if (!authenticated || !wallets?.length) {
       throw new Error('No authenticated wallet available.');
@@ -488,32 +567,10 @@ export const useRelay = () => {
     });
     const isSolanaOrigin = originChainId === 792703809;
     const isSolanaDestination = destinationChainId === 792703809;
-    let solanaRecipient = isSolanaDestination ? solanaWallets?.[0]?.address ?? null : null;
-    let solanaUser = isSolanaOrigin ? solanaWallets?.[0]?.address ?? null : null;
-    if ((isSolanaOrigin || isSolanaDestination) && (!solanaRecipient || !solanaUser)) {
-      const cachedToken = await getCachedPrivyAccessToken(getAccessToken).catch(() => null);
-      const response = cachedToken
-        ? await fetch('/api/chat', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              message: 'resolve solana address',
-              history: [],
-              accessToken: cachedToken,
-              selectedChain: 'SOLANA_MAINNET',
-              solanaAddress: null,
-            }),
-          }).catch(() => null)
-        : null;
-      if (response?.ok) {
-        const payload = await response.json().catch(() => ({}));
-        const resolved = typeof payload?.solAddress === 'string' ? payload.solAddress : null;
-        if (isSolanaDestination) solanaRecipient = resolved;
-        if (isSolanaOrigin) solanaUser = resolved;
-      }
-      if ((isSolanaDestination && !solanaRecipient) || (isSolanaOrigin && !solanaUser)) {
-        throw new Error('Missing Solana wallet address for Relay. Connect a Solana wallet in Privy.');
-      }
+    const solanaRecipient = isSolanaDestination ? solanaWallets?.[0]?.address ?? null : null;
+    const solanaUser = isSolanaOrigin ? solanaWallets?.[0]?.address ?? null : null;
+    if ((isSolanaDestination && !solanaRecipient) || (isSolanaOrigin && !solanaUser)) {
+      throw new Error('Missing Solana wallet address for Relay. Connect a Solana wallet in Privy.');
     }
 
     if (!isSolanaOrigin && !evmAddress) {
@@ -574,9 +631,11 @@ export const useRelay = () => {
     };
     console.log('[Relay] quote request', relayRequest);
 
-    const maxQuoteAttempts = 2;
+    const maxQuoteAttempts = 3;
+    const maxQuoteAgeMs = 12_000;
     let requestId: string | null = null;
     let relayQuote: RelayQuoteResponse | null = null;
+    let quoteReceivedAtMs = 0;
     let totalRelayGasPaidRaw = 0n;
 
     for (let quoteAttempt = 1; quoteAttempt <= maxQuoteAttempts; quoteAttempt += 1) {
@@ -600,6 +659,7 @@ export const useRelay = () => {
           return (await res.json()) as RelayQuoteResponse;
         }
       );
+      quoteReceivedAtMs = Date.now();
 
       requestId = null;
       for (const step of relayQuote.steps) {
@@ -616,6 +676,7 @@ export const useRelay = () => {
         quoteAttempt,
         maxQuoteAttempts,
         requestId,
+        quoteReceivedAtMs,
         stepCount: relayQuote.steps.length,
       });
 
@@ -889,6 +950,19 @@ export const useRelay = () => {
         const resolvedChainId = Number(data?.chainId ?? fallbackEvmChainId);
         const resolvedValue = data?.value ?? '0x0';
 
+        const quoteAgeMs = quoteReceivedAtMs > 0 ? Date.now() - quoteReceivedAtMs : Number.POSITIVE_INFINITY;
+        if (quoteAgeMs > maxQuoteAgeMs) {
+          console.warn('[Relay] quote is stale before EVM send; re-quoting', {
+            quoteAttempt,
+            maxQuoteAttempts,
+            quoteAgeMs,
+            maxQuoteAgeMs,
+            stepId: step.id,
+          });
+          shouldRetryWithFreshQuote = true;
+          break;
+        }
+
         if (!data?.to || !data?.data || !Number.isFinite(resolvedChainId) || resolvedChainId <= 0) {
           console.warn('[Relay] Missing tx data for step item', {
             stepId: step.id,
@@ -906,6 +980,35 @@ export const useRelay = () => {
           ethereumProvider: ethereumProvider as { request?: (args: { method: string; params?: unknown[] }) => Promise<unknown> },
           chainId: resolvedChainId,
         });
+
+        const preflight = await runRelayEvmPreflight({
+          ethereumProvider: ethereumProvider as {
+            request?: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
+          },
+          chainId: resolvedChainId,
+          tx: {
+            from: data.from ?? evmAddress,
+            to: txTo,
+            data: txData,
+            value: resolvedValue,
+          },
+        });
+
+        if (!preflight.ok) {
+          console.warn('[Relay] EVM preflight failed', {
+            stepId: step.id,
+            quoteAttempt,
+            maxQuoteAttempts,
+            retryableQuote: preflight.retryableQuote,
+            reason: preflight.reason,
+          });
+          if (preflight.retryableQuote && quoteAttempt < maxQuoteAttempts) {
+            shouldRetryWithFreshQuote = true;
+            break;
+          }
+          throw new Error(preflight.reason);
+        }
+
         await withWaitLogger(
           {
             file: 'altair_frontend1/src/lib/useRelay.ts',
@@ -915,7 +1018,7 @@ export const useRelay = () => {
           async () => {
             // For Relay route drift, retrying the same payload is usually ineffective.
             // Try once, then immediately re-quote on retryable failures.
-            const maxAttempts = 1;
+            const maxAttempts = 2;
             let lastError: unknown = null;
 
             for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
@@ -954,6 +1057,7 @@ export const useRelay = () => {
               } catch (err) {
                 lastError = err;
                 const retryable = isRetryableRelayEvmError(err);
+                const transientRetryable = isTransientRelayEvmTransportError(err);
                 const isLastAttempt = attempt >= maxAttempts;
 
                 console.warn('[Relay] EVM transaction attempt failed', {
@@ -961,6 +1065,7 @@ export const useRelay = () => {
                   attempt,
                   maxAttempts,
                   retryable,
+                  transientRetryable,
                   error: err instanceof Error ? err.message : String(err),
                 });
 
@@ -984,6 +1089,16 @@ export const useRelay = () => {
                 }
 
                 if (retryable && quoteAttempt < maxQuoteAttempts) {
+                  shouldRetryWithFreshQuote = true;
+                  return;
+                }
+
+                if (transientRetryable && !isLastAttempt) {
+                  await wait(550 * attempt + randomJitter(250));
+                  continue;
+                }
+
+                if (transientRetryable && quoteAttempt < maxQuoteAttempts) {
                   shouldRetryWithFreshQuote = true;
                   return;
                 }
@@ -1012,6 +1127,7 @@ export const useRelay = () => {
           maxQuoteAttempts,
           requestId,
         });
+        await wait(350 * quoteAttempt + randomJitter(200));
         continue;
       }
 
