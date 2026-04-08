@@ -117,6 +117,7 @@ export default function UserMenu() {
   const tokenIconSize = Number(tokenIconsConfig.size) * buttonSize;
   const tokenIconFileType = tokenIconsConfig.fileType;
   const tokenIconFileSize = tokenIconsConfig.fileSize;
+  const tokenIconPlaceholderColor = tokenIconsConfig.placeholderColor;
   const walletWidth = WALLET_DISPLAY.width;
   const titleConfig = WALLET_DISPLAY.title;
   const titlePaddingTop = titleConfig.paddingTop * buttonSize;
@@ -1133,18 +1134,31 @@ export default function UserMenu() {
               paddingBottom: `${tokenRowPaddingBottom}px`,
             }}
           >
-            <img
-              src={iconSrc}
-              alt={symbol}
+            <div
               style={{
                 width: `${tokenIconSize}px`,
                 height: `${tokenIconSize}px`,
-                objectFit: 'contain',
+                borderRadius: '50%',
+                backgroundColor: tokenIconPlaceholderColor,
                 flexShrink: 0,
                 marginRight: `${Math.round(tokenIconSize * 0.4)}px`,
+                position: 'relative',
+                overflow: 'hidden',
               }}
-              onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
-            />
+            >
+              <img
+                src={iconSrc}
+                alt={symbol}
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  width: '100%',
+                  height: '100%',
+                  objectFit: 'contain',
+                }}
+                onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+              />
+            </div>
             <span
               className="flex-1"
               style={{

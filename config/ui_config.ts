@@ -60,6 +60,7 @@ export const WALLET_DISPLAY = { // Wallet panel/dropdown sizing and typography c
     fileSize: '128px', // Subfolder name under public/image/tokens/<fileType>/ in UserMenu.tsx
     size: 20, // Rendered icon size in pixels in UserMenu.tsx
     placeholderColor: '#1F2937',
+    placeholderFontColor: '#d1d5db',
   },
   title: { // Wallet panel title padding and font in UserMenu.tsx
     paddingTop: 2, // Title top padding in UserMenu.tsx
