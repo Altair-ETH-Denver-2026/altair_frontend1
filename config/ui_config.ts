@@ -15,13 +15,15 @@ export const PANEL_DISPLAY = {
 };
 
 export const ACTIVE_NETWORK_DROPDOWN = {
-  width: 240, // w-48 = 48 * 4 = 192px (Tailwind w-48 = 12rem = 192px)
+  width: 350, // w-48 = 48 * 4 = 192px (Tailwind w-48 = 12rem = 192px)
   fontSize: 14, // text-sm = 14px
-  fontName: 'sans-serif', // default font
+  fontName: 'monospace', // default font
   fontColor: '#d1d5db', // text-gray-300
   itemColor: '#101828', // bg-gray-900
   itemHighlightColor: '#1f2937', // hover:bg-gray-800
-  itemHeight: 48, // py-3 = 12px top + bottom, estimated total height
+  itemHeight: 36, // py-3 = 12px top + bottom, estimated total height
+  allCaps: true,
+  letterSpacing: '0.3em',
 }
 
 export const WALLET_DISPLAY = { // Wallet panel/dropdown sizing and typography config consumed in altair_frontend1/src/components/UserMenu.tsx
@@ -58,7 +60,7 @@ export const WALLET_DISPLAY = { // Wallet panel/dropdown sizing and typography c
   tokenIcons: { // Token icon config used in renderBalances in UserMenu.tsx
     fileType: 'webp', // Image file extension in UserMenu.tsx
     fileSize: '128px', // Subfolder name under public/image/tokens/<fileType>/ in UserMenu.tsx
-    size: 20, // Rendered icon size in pixels in UserMenu.tsx
+    size: 25, // Rendered icon size in pixels in UserMenu.tsx
     placeholderColor: '#1F2937',
     placeholderFontColor: '#d1d5db',
     spin: true,
@@ -89,6 +91,13 @@ export const WALLET_DISPLAY = { // Wallet panel/dropdown sizing and typography c
   chainDropdown: { // Wallet chain dropdown sizing in UserMenu.tsx
     width: 212, // Dropdown width in UserMenu.tsx
     fontSize: 12, // Dropdown font size in UserMenu.tsx
+    fontName: 'monospace',
+    fontColor: '#d1d5db',
+    allCaps: true,
+    letterSpacing: '0.3em',
+    itemColor: '#111827',
+    itemHighlightColor: '#1f2937',
+    itemHeight: 32,
   },
   tokenDropdown: { 
     width: 124,
@@ -286,9 +295,16 @@ export const ADD_PANEL_DISPLAY = { // ADD_PANEL sizing, label, and icon styles i
     size: 23, // Close icon size in UserMenu.tsx
     fontName: 'sans-serif', // Close font family in UserMenu.tsx
   },
-  chainDropdown: { // ADD_PANEL chain dropdown sizing in UserMenu.tsx
+  chainDropdown: { // Wallet chain dropdown sizing in UserMenu.tsx
     width: 212, // Dropdown width in UserMenu.tsx
-    fontSize: 10, // Dropdown font size in UserMenu.tsx
+    fontSize: 12, // Dropdown font size in UserMenu.tsx
+    fontName: 'monospace',
+    fontColor: '#d1d5db',
+    allCaps: true,
+    letterSpacing: '0.3em',
+    itemColor: '#111827',
+    itemHighlightColor: '#1f2937',
+    itemHeight: 32,
   },
 };
 

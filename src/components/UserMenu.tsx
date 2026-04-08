@@ -14,6 +14,7 @@ import { PublicKey } from '@solana/web3.js';
 import { UserRound, LogOut, Settings, Wallet, Wrench, Copy, Globe2, Check } from 'lucide-react';
 import WalletPanel from './panels/WalletPanel';
 import AddPanel from './panels/AddPanel';
+import { SpinningLogo } from './SpinningLogo';
 import { useEffect as useClientEffect } from 'react';
 import { BLOCKCHAIN, CHAINS, GAS_RESERVES, GAS_TOKENS, FORCE_QUERY_CHAINS, type ChainKey } from '../../config/blockchain_config';
 import { BASE_MAINNET, BASE_SEPOLIA, ETH_MAINNET, ETH_SEPOLIA, SOLANA_MAINNET, SOLANA_DEVNET, resolveRpcUrls } from '../../config/chain_info';
@@ -119,6 +120,7 @@ export default function UserMenu() {
   const tokenIconFileSize = tokenIconsConfig.fileSize;
   const tokenIconPlaceholderColor = tokenIconsConfig.placeholderColor;
   const tokenIconPlaceholderFontColor = tokenIconsConfig.placeholderFontColor;
+  const tokenIconSpinEnabled = Boolean(tokenIconsConfig.spin);
   const walletWidth = WALLET_DISPLAY.width;
   const titleConfig = WALLET_DISPLAY.title;
   const titlePaddingTop = titleConfig.paddingTop * buttonSize;
@@ -133,6 +135,8 @@ export default function UserMenu() {
   const chainDropdownConfig = WALLET_DISPLAY.chainDropdown;
   const chainDropdownWidth = chainDropdownConfig.width * buttonSize;
   const chainDropdownFontSize = chainDropdownConfig.fontSize * buttonSize;
+  const chainDropdownItemColor = chainDropdownConfig.itemColor ?? '#111827';
+  const chainDropdownItemHighlightColor = chainDropdownConfig.itemHighlightColor ?? '#1f2937';
   const tokenDropdownConfig = WALLET_DISPLAY.tokenDropdown ?? { width: chainDropdownWidth, fontSize: 12, fontName: 'sans-serif' };
   const tokenDropdownWidthRaw = tokenDropdownConfig.width ?? chainDropdownWidth;
   const tokenDropdownWidthValue = tokenDropdownWidthRaw ? tokenDropdownWidthRaw : '100%';
@@ -299,6 +303,13 @@ export default function UserMenu() {
   const addPanelChainDropdownConfig = ADD_PANEL_DISPLAY.chainDropdown;
   const addPanelChainDropdownWidth = addPanelChainDropdownConfig.width;
   const addPanelChainDropdownFontSize = addPanelChainDropdownConfig.fontSize;
+  const addPanelChainDropdownFontName = addPanelChainDropdownConfig.fontName ?? addPanelLabelFontFamily;
+  const addPanelChainDropdownFontColor = addPanelChainDropdownConfig.fontColor ?? '#d1d5db';
+  const addPanelChainDropdownAllCaps = addPanelChainDropdownConfig.allCaps ?? true;
+  const addPanelChainDropdownLetterSpacing = addPanelChainDropdownConfig.letterSpacing ?? '0.3em';
+  const addPanelChainDropdownItemColor = addPanelChainDropdownConfig.itemColor ?? '#111827';
+  const addPanelChainDropdownItemHighlightColor = addPanelChainDropdownConfig.itemHighlightColor ?? '#1f2937';
+  const addPanelChainDropdownItemHeight = Number(addPanelChainDropdownConfig.itemHeight ?? 32);
   const formatDisplayAddress = (address: string) => {
     if (!address) return '—';
     const isEvm = address.startsWith('0x');
@@ -1163,23 +1174,39 @@ export default function UserMenu() {
             <div style={placeholderCircleStyle}>
               {iconSrc ? (
                 <>
-                  <img
-                    src={iconSrc}
-                    alt={symbol}
-                    style={{
-                      position: 'absolute',
-                      inset: 0,
-                      width: '100%',
-                      height: '100%',
-                      objectFit: 'contain',
-                    }}
-                    onError={(e) => {
-                      const img = e.currentTarget as HTMLImageElement;
-                      img.style.display = 'none';
-                      const fallback = img.nextSibling as HTMLElement | null;
-                      if (fallback) fallback.style.display = 'flex';
-                    }}
-                  />
+                  {tokenIconSpinEnabled ? (
+                    <SpinningLogo
+                      src={iconSrc}
+                      alt={symbol}
+                      width={tokenIconSize}
+                      height={tokenIconSize}
+                      className="absolute inset-0 h-full w-full object-contain"
+                      onError={(e) => {
+                        const img = e.currentTarget as HTMLImageElement;
+                        img.style.display = 'none';
+                        const fallback = img.nextSibling as HTMLElement | null;
+                        if (fallback) fallback.style.display = 'flex';
+                      }}
+                    />
+                  ) : (
+                    <img
+                      src={iconSrc}
+                      alt={symbol}
+                      style={{
+                        position: 'absolute',
+                        inset: 0,
+                        width: '100%',
+                        height: '100%',
+                        objectFit: 'contain',
+                      }}
+                      onError={(e) => {
+                        const img = e.currentTarget as HTMLImageElement;
+                        img.style.display = 'none';
+                        const fallback = img.nextSibling as HTMLElement | null;
+                        if (fallback) fallback.style.display = 'flex';
+                      }}
+                    />
+                  )}
                   <span style={{ ...questionMarkStyle, display: 'none' }}>?</span>
                 </>
               ) : (
@@ -1262,6 +1289,8 @@ export default function UserMenu() {
       titleFontFamily={titleFontFamily}
       chainDropdownFontSize={chainDropdownFontSize}
       chainDropdownWidth={chainDropdownWidth}
+      chainDropdownItemColor={chainDropdownItemColor}
+      chainDropdownItemHighlightColor={chainDropdownItemHighlightColor}
       walletChainOptions={walletChainOptions}
       resolveWalletTitle={resolveWalletTitle}
       onToggleChainOpen={(panelId) => {
@@ -1546,6 +1575,13 @@ export default function UserMenu() {
       iconButtons={addPanelIconButtons}
       chainDropdownFontSize={addPanelChainDropdownFontSize}
       chainDropdownWidth={addPanelChainDropdownWidth}
+      chainDropdownFontName={addPanelChainDropdownFontName}
+      chainDropdownFontColor={addPanelChainDropdownFontColor}
+      chainDropdownAllCaps={addPanelChainDropdownAllCaps}
+      chainDropdownLetterSpacing={addPanelChainDropdownLetterSpacing}
+      chainDropdownItemColor={addPanelChainDropdownItemColor}
+      chainDropdownItemHighlightColor={addPanelChainDropdownItemHighlightColor}
+      chainDropdownItemHeight={addPanelChainDropdownItemHeight}
       titlePaddingBottom={addPanelTitlePaddingBottom}
       isChainOpen={isAddPanelChainOpen}
       isIconHovered={isAddPanelIconHovered}
@@ -1651,6 +1687,8 @@ export default function UserMenu() {
                     fontSize: `${ACTIVE_NETWORK_DROPDOWN.fontSize}px`,
                     fontFamily: ACTIVE_NETWORK_DROPDOWN.fontName,
                     color: ACTIVE_NETWORK_DROPDOWN.fontColor,
+                    textTransform: ACTIVE_NETWORK_DROPDOWN.allCaps ? 'uppercase' : 'none',
+                    letterSpacing: ACTIVE_NETWORK_DROPDOWN.letterSpacing,
                     backgroundColor: 'transparent',
                   }}
                   onMouseEnter={(e) => {
@@ -1753,12 +1791,13 @@ export default function UserMenu() {
               </button>
               {isWalletDropdownChainOpen && (
                 <div
-                  className="absolute left-1/2 top-full z-[120] -translate-x-1/2 rounded-xl border border-gray-500 bg-gray-900 shadow-2xl"
+                  className="absolute left-1/2 top-full z-[120] -translate-x-1/2 rounded-xl border border-gray-500 shadow-2xl"
                   style={{
                     fontSize: `${chainDropdownFontSize}px`,
                     fontFamily: titleFontFamily,
                     marginTop: `${titlePaddingBottom}px`,
                     width: `${chainDropdownWidth}px`,
+                    backgroundColor: chainDropdownItemColor,
                   }}
                 >
                   {walletChainOptions.filter((option) => option.key !== walletDropdownChain).map((option) => {
@@ -1772,12 +1811,19 @@ export default function UserMenu() {
                           setWalletDropdownHasCustomChain(true);
                           setIsWalletDropdownChainOpen(false);
                         }}
-                        className="flex w-full items-center uppercase tracking-[0.3em] text-gray-300 hover:bg-gray-800 transition-colors"
+                        className="flex w-full items-center uppercase tracking-[0.3em] text-gray-300 transition-colors"
+                        onMouseEnter={(event) => {
+                          event.currentTarget.style.backgroundColor = chainDropdownItemHighlightColor;
+                        }}
+                        onMouseLeave={(event) => {
+                          event.currentTarget.style.backgroundColor = 'transparent';
+                        }}
                         style={{
                           paddingLeft: `${containerPaddingLeft}px`,
                           paddingRight: `${containerPaddingRight}px`,
                           paddingTop: '8px',
                           paddingBottom: '8px',
+                          backgroundColor: 'transparent',
                         }}
                       >
                         <span className="mr-2 w-4 flex justify-center">

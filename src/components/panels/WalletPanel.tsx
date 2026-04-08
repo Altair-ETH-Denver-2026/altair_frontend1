@@ -20,6 +20,8 @@ type WalletPanelProps = {
   titleFontFamily: string;
   chainDropdownFontSize: number;
   chainDropdownWidth: number;
+  chainDropdownItemColor: string;
+  chainDropdownItemHighlightColor: string;
   walletChainOptions: ReadonlyArray<{ key: ChainKey | 'ALL'; label: string }>;
   resolveWalletTitle: (chainKey: ChainKey | 'ALL') => string;
   onToggleChainOpen: (panelId: number) => void;
@@ -114,6 +116,8 @@ export default function WalletPanel({
   titleFontFamily,
   chainDropdownFontSize,
   chainDropdownWidth,
+  chainDropdownItemColor,
+  chainDropdownItemHighlightColor,
   walletChainOptions,
   resolveWalletTitle,
   onToggleChainOpen,
@@ -231,12 +235,13 @@ export default function WalletPanel({
         </button>
         {panel.isChainOpen && (
           <div
-            className="absolute left-1/2 top-full z-[120] -translate-x-1/2 rounded-xl border border-gray-500 bg-gray-900 shadow-2xl pointer-events-auto overflow-hidden"
+            className="absolute left-1/2 top-full z-[120] -translate-x-1/2 rounded-xl border border-gray-500 shadow-2xl pointer-events-auto overflow-hidden"
             style={{
               fontSize: `${chainDropdownFontSize}px`,
               fontFamily: titleFontFamily,
               marginTop: `${titlePaddingBottom}px`,
               width: `${chainDropdownWidth}px`,
+              backgroundColor: chainDropdownItemColor,
             }}
           >
             {walletChainOptions.filter((option) => option.key !== panel.chainKey).map((option) => {
@@ -246,12 +251,19 @@ export default function WalletPanel({
                   key={option.key}
                   type="button"
                   onClick={() => onSelectChain(panel.id, option.key)}
-                  className="flex w-full items-center uppercase tracking-[0.3em] text-gray-300 hover:bg-gray-800 transition-colors cursor-pointer"
+                  className="flex w-full items-center uppercase tracking-[0.3em] text-gray-300 transition-colors cursor-pointer"
+                  onMouseEnter={(event) => {
+                    event.currentTarget.style.backgroundColor = chainDropdownItemHighlightColor;
+                  }}
+                  onMouseLeave={(event) => {
+                    event.currentTarget.style.backgroundColor = 'transparent';
+                  }}
                   style={{
                     paddingLeft: `${containerPaddingLeft}px`,
                     paddingRight: `${containerPaddingRight}px`,
                     paddingTop: '8px',
                     paddingBottom: '8px',
+                    backgroundColor: 'transparent',
                   }}
                 >
                   <span className="mr-2 w-4 flex justify-center">
