@@ -118,6 +118,7 @@ export default function UserMenu() {
   const tokenIconFileType = tokenIconsConfig.fileType;
   const tokenIconFileSize = tokenIconsConfig.fileSize;
   const tokenIconPlaceholderColor = tokenIconsConfig.placeholderColor;
+  const tokenIconPlaceholderFontColor = tokenIconsConfig.placeholderFontColor;
   const walletWidth = WALLET_DISPLAY.width;
   const titleConfig = WALLET_DISPLAY.title;
   const titlePaddingTop = titleConfig.paddingTop * buttonSize;
@@ -1115,8 +1116,33 @@ export default function UserMenu() {
       }
     }
   };
-  const resolveTokenIconSrc = (symbol: string): string =>
-    `/image/tokens/${tokenIconFileType}/${tokenIconFileSize}/${symbol}.${tokenIconFileType}`;
+  const resolveTokenIconSrc = (symbol: string): string | null => {
+    if (!symbol || !tokenIconFileType || !tokenIconFileSize) return null;
+    return `/image/tokens/${tokenIconFileType}/${tokenIconFileSize}/${symbol}.${tokenIconFileType}`;
+  };
+
+  const placeholderCircleStyle: React.CSSProperties = {
+    width: `${tokenIconSize}px`,
+    height: `${tokenIconSize}px`,
+    borderRadius: '50%',
+    backgroundColor: tokenIconPlaceholderColor,
+    flexShrink: 0,
+    marginRight: `${Math.round(tokenIconSize * 0.4)}px`,
+    position: 'relative',
+    overflow: 'hidden',
+  };
+
+  const questionMarkStyle: React.CSSProperties = {
+    position: 'absolute',
+    inset: 0,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: `${Math.round(tokenIconSize * 0.55)}px`,
+    color: tokenIconPlaceholderFontColor,
+    userSelect: 'none',
+    pointerEvents: 'none',
+  };
 
   const renderBalances = (chainKey: ChainKey | 'ALL') => {
     const rows = resolveTokenRows(chainKey);
@@ -1134,30 +1160,31 @@ export default function UserMenu() {
               paddingBottom: `${tokenRowPaddingBottom}px`,
             }}
           >
-            <div
-              style={{
-                width: `${tokenIconSize}px`,
-                height: `${tokenIconSize}px`,
-                borderRadius: '50%',
-                backgroundColor: tokenIconPlaceholderColor,
-                flexShrink: 0,
-                marginRight: `${Math.round(tokenIconSize * 0.4)}px`,
-                position: 'relative',
-                overflow: 'hidden',
-              }}
-            >
-              <img
-                src={iconSrc}
-                alt={symbol}
-                style={{
-                  position: 'absolute',
-                  inset: 0,
-                  width: '100%',
-                  height: '100%',
-                  objectFit: 'contain',
-                }}
-                onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
-              />
+            <div style={placeholderCircleStyle}>
+              {iconSrc ? (
+                <>
+                  <img
+                    src={iconSrc}
+                    alt={symbol}
+                    style={{
+                      position: 'absolute',
+                      inset: 0,
+                      width: '100%',
+                      height: '100%',
+                      objectFit: 'contain',
+                    }}
+                    onError={(e) => {
+                      const img = e.currentTarget as HTMLImageElement;
+                      img.style.display = 'none';
+                      const fallback = img.nextSibling as HTMLElement | null;
+                      if (fallback) fallback.style.display = 'flex';
+                    }}
+                  />
+                  <span style={{ ...questionMarkStyle, display: 'none' }}>?</span>
+                </>
+              ) : (
+                <span style={questionMarkStyle}>?</span>
+              )}
             </div>
             <span
               className="flex-1"
