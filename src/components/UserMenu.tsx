@@ -104,6 +104,7 @@ export default function UserMenu() {
   const tokenRowConfig = WALLET_DISPLAY.rows;
   const tokenSymbolsConfig = WALLET_DISPLAY.tokenSymbols;
   const tokenBalancesConfig = WALLET_DISPLAY.tokenBalances;
+  const tokenIconsConfig = WALLET_DISPLAY.tokenIcons;
   const tokenRowPaddingTop = tokenRowConfig.paddingTop * buttonSize;
   const tokenRowPaddingBottom = tokenRowConfig.paddingBottom * buttonSize;
   const tokenSymbolFontSize = tokenSymbolsConfig.fontSize * buttonSize;
@@ -113,6 +114,9 @@ export default function UserMenu() {
   const tokenBalanceFontFamily = tokenBalancesConfig.fontName;
   const tokenBalanceColor = tokenBalancesConfig.color;
   const tokenBalanceDecimals = tokenBalancesConfig.decimals;
+  const tokenIconSize = Number(tokenIconsConfig.size) * buttonSize;
+  const tokenIconFileType = tokenIconsConfig.fileType;
+  const tokenIconFileSize = tokenIconsConfig.fileSize;
   const walletWidth = WALLET_DISPLAY.width;
   const titleConfig = WALLET_DISPLAY.title;
   const titlePaddingTop = titleConfig.paddingTop * buttonSize;
@@ -1110,10 +1114,14 @@ export default function UserMenu() {
       }
     }
   };
+  const resolveTokenIconSrc = (symbol: string): string =>
+    `/image/tokens/${tokenIconFileType}/${tokenIconFileSize}/${symbol}.${tokenIconFileType}`;
+
   const renderBalances = (chainKey: ChainKey | 'ALL') => {
     const rows = resolveTokenRows(chainKey);
     return rows.map((symbol, index) => {
       const balanceValue = resolveBalanceForSymbol(chainKey, symbol);
+      const iconSrc = resolveTokenIconSrc(symbol);
       return (
         <React.Fragment key={symbol}>
           <div
@@ -1125,6 +1133,18 @@ export default function UserMenu() {
               paddingBottom: `${tokenRowPaddingBottom}px`,
             }}
           >
+            <img
+              src={iconSrc}
+              alt={symbol}
+              style={{
+                width: `${tokenIconSize}px`,
+                height: `${tokenIconSize}px`,
+                objectFit: 'contain',
+                flexShrink: 0,
+                marginRight: `${Math.round(tokenIconSize * 0.4)}px`,
+              }}
+              onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+            />
             <span
               className="flex-1"
               style={{

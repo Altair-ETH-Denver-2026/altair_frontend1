@@ -55,6 +55,12 @@ export const WALLET_DISPLAY = { // Wallet panel/dropdown sizing and typography c
     color: '#f3f4f6', // Token balance color in UserMenu.tsx
     decimals: 8, // Token balance decimal precision in UserMenu.tsx
   },
+  tokenIcons: { // Token icon config used in renderBalances in UserMenu.tsx
+    fileType: 'webp', // Image file extension in UserMenu.tsx
+    fileSize: '128px', // Subfolder name under public/image/tokens/<fileType>/ in UserMenu.tsx
+    size: 20, // Rendered icon size in pixels in UserMenu.tsx
+    placeholderColor: '#1F2937',
+  },
   title: { // Wallet panel title padding and font in UserMenu.tsx
     paddingTop: 2, // Title top padding in UserMenu.tsx
     paddingBottom: 2, // Title bottom padding in UserMenu.tsx
