@@ -80,6 +80,7 @@ Defined in [`WALLET_DISPLAY.tokenIcons`](../../config/ui_config.ts):
 - `size`
 - `placeholderColor`
 - `placeholderFontColor`
+- `spin`
 
 ### Asset path
 
@@ -98,6 +99,11 @@ Implemented in [`resolveTokenIconSrc`](../../src/components/UserMenu.tsx) and [`
 3. If `iconSrc` is falsy, a centered `?` is shown immediately.
 4. If `iconSrc` is truthy but image loading fails (`onError`), image is hidden and centered `?` is shown.
 
+Spin behavior:
+
+- If `tokenIcons.spin` is `true`, icons render through [`SpinningLogo`](../../src/components/SpinningLogo.tsx), inheriting the same mouse/touch spin trigger behavior as primary logos.
+- If `tokenIcons.spin` is `false`, icons render as static images.
+
 This guarantees instant row stability and visible fallback semantics in all cases.
 
 ---
@@ -107,8 +113,29 @@ This guarantees instant row stability and visible fallback semantics in all case
 Wallet display styling is intentionally centralized in [`ui_config.ts`](../../config/ui_config.ts):
 
 - global wallet dimensions and button style
-- chain dropdown sizing
+- chain dropdown sizing + typography + casing + spacing + fill/hover fill
 - token row typography and spacing
-- token icon dimensions and fallback colors
+- token icon dimensions, fallback colors, and spin toggle
 
 Component code in [`UserMenu.tsx`](../../src/components/UserMenu.tsx) consumes config values directly, keeping runtime behavior predictable and adjustable without structural UI refactors.
+
+---
+
+## Chain dropdown styling surfaces (config-driven)
+
+Wallet-related chain dropdowns are now fully style-driven from [`ui_config.ts`](../../config/ui_config.ts):
+
+1. **Active Network dropdown**
+   - Config: `ACTIVE_NETWORK_DROPDOWN`
+   - UI path: [`UserMenu.tsx`](../../src/components/UserMenu.tsx)
+   - Supports: width, font, text color, `allCaps`, `letterSpacing`, item fill, item hover fill, item height
+
+2. **Wallet chain dropdowns (panel + wallet dropdown mode)**
+   - Config: `WALLET_DISPLAY.chainDropdown`
+   - UI paths: [`WalletPanel.tsx`](../../src/components/panels/WalletPanel.tsx), [`UserMenu.tsx`](../../src/components/UserMenu.tsx)
+   - Supports: width, font size/family/color, `allCaps`, `letterSpacing`, item fill, item hover fill, item height
+
+3. **ADD_PANEL chain dropdown**
+   - Config: `ADD_PANEL_DISPLAY.chainDropdown`
+   - UI paths: [`AddPanel.tsx`](../../src/components/panels/AddPanel.tsx), prop plumbing in [`UserMenu.tsx`](../../src/components/UserMenu.tsx)
+   - Supports: width, font size/family/color, `allCaps`, `letterSpacing`, item fill, item hover fill, item height
