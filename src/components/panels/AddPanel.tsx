@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import Image from 'next/image';
 import { Wallet, Check } from 'lucide-react';
 import type { ChainKey } from '../../../config/blockchain_config';
 import Panel from '../Panel';
@@ -260,16 +261,12 @@ export default function AddPanel({
                               }}
                             />
                           ) : (
-                            <img
+                            <Image
                               src={chainIconSrc}
                               alt={option.label}
-                              style={{
-                                position: 'absolute',
-                                inset: 0,
-                                width: '100%',
-                                height: '100%',
-                                objectFit: 'contain',
-                              }}
+                              width={chainIconSize}
+                              height={chainIconSize}
+                              className="absolute inset-0 h-full w-full object-contain"
                               onError={(e) => {
                                 const img = e.currentTarget as HTMLImageElement;
                                 img.style.display = 'none';

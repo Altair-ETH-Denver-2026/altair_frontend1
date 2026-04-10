@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
+import Image from 'next/image';
 import { ethers } from 'ethers';
 import { usePrivy, useWallets } from '@privy-io/react-auth';
 import { useWallets as useSolanaWallets, useSignAndSendTransaction } from '@privy-io/react-auth/solana';
@@ -214,10 +215,70 @@ export default function UserMenu() {
   const withdrawCancelHighlightColor = withdrawCancelButtonConfig.highlightColor ?? withdrawCancelButtonConfig.buttonColor;
   const withdrawCancelActiveColor = withdrawCancelButtonConfig.activeColor ?? withdrawCancelButtonConfig.buttonColor;
   const withdrawCancelActiveBorderColor = withdrawCancelButtonConfig.activeBorderColor ?? withdrawCancelButtonConfig.borderColor;
+  const activeNetworkMenuIconsOverride = (
+    ACTIVE_NETWORK_DROPDOWN as unknown as {
+      MENU_ICONS_override?: {
+        buttonText?: Record<string, unknown>;
+        chainIcon?: Record<string, unknown>;
+      };
+    }
+  ).MENU_ICONS_override;
   const menuButtonTextConfig = MENU_ICONS.buttonText ?? { fontSize: 13, fontName: 'sans-serif', fontColor: '#f3f4f6' };
-  const menuButtonTextFontSize = Number(menuButtonTextConfig.fontSize ?? 13);
-  const menuButtonTextFontFamily = menuButtonTextConfig.fontName ?? 'sans-serif';
-  const menuButtonTextFontColor = menuButtonTextConfig.fontColor ?? '#f3f4f6';
+  const activeNetworkMenuButtonTextConfig = activeNetworkMenuIconsOverride?.buttonText ?? {};
+  const menuButtonTextFontSize = Number(
+    typeof activeNetworkMenuButtonTextConfig.fontSize === 'number'
+      ? activeNetworkMenuButtonTextConfig.fontSize
+      : menuButtonTextConfig.fontSize ?? 13
+  );
+  const menuButtonTextFontFamily =
+    typeof activeNetworkMenuButtonTextConfig.fontName === 'string'
+      ? activeNetworkMenuButtonTextConfig.fontName
+      : menuButtonTextConfig.fontName ?? 'sans-serif';
+  const menuButtonTextFontColor =
+    typeof activeNetworkMenuButtonTextConfig.fontColor === 'string'
+      ? activeNetworkMenuButtonTextConfig.fontColor
+      : menuButtonTextConfig.fontColor ?? '#f3f4f6';
+  const activeNetworkMenuChainIconConfig = activeNetworkMenuIconsOverride?.chainIcon;
+  const activeNetworkMenuChainIconEnabled = Boolean(activeNetworkMenuChainIconConfig);
+  const activeNetworkMenuChainIconSize = Number(
+    typeof activeNetworkMenuChainIconConfig?.size === 'number'
+      ? activeNetworkMenuChainIconConfig.size
+      : MENU_ICONS.size * 4
+  );
+  const activeNetworkMenuChainIconFileType =
+    typeof activeNetworkMenuChainIconConfig?.fileType === 'string'
+      ? activeNetworkMenuChainIconConfig.fileType
+      : 'webp';
+  const activeNetworkMenuChainIconFileSize =
+    typeof activeNetworkMenuChainIconConfig?.fileSize === 'string'
+      ? activeNetworkMenuChainIconConfig.fileSize
+      : '128px';
+  const activeNetworkMenuChainIconBorderPosition =
+    typeof activeNetworkMenuChainIconConfig?.borderPosition === 'string'
+      ? activeNetworkMenuChainIconConfig.borderPosition
+      : 'inner';
+  const activeNetworkMenuChainIconBorderColor =
+    typeof activeNetworkMenuChainIconConfig?.borderColor === 'string'
+      ? activeNetworkMenuChainIconConfig.borderColor
+      : null;
+  const activeNetworkMenuChainIconBorderWidth =
+    typeof activeNetworkMenuChainIconConfig?.borderWidth === 'number'
+      ? activeNetworkMenuChainIconConfig.borderWidth
+      : null;
+  const activeNetworkMenuChainIconPlaceholderColor =
+    typeof activeNetworkMenuChainIconConfig?.placeholderColor === 'string'
+      ? activeNetworkMenuChainIconConfig.placeholderColor
+      : '#1F2937';
+  const activeNetworkMenuChainIconPlaceholderFontColor =
+    typeof activeNetworkMenuChainIconConfig?.placeholderFontColor === 'string'
+      ? activeNetworkMenuChainIconConfig.placeholderFontColor
+      : '#d1d5db';
+  const activeNetworkMenuChainIconPlaceholderFontSize = Number(
+    typeof activeNetworkMenuChainIconConfig?.placeholderFontSize === 'number'
+      ? activeNetworkMenuChainIconConfig.placeholderFontSize
+      : Math.round(activeNetworkMenuChainIconSize * 0.55)
+  );
+  const activeNetworkMenuChainIconSpinEnabled = Boolean(activeNetworkMenuChainIconConfig?.spin);
   const activeNetworkChainIconsConfig = ACTIVE_NETWORK_DROPDOWN.chainIcons;
   const activeNetworkChainIconSize = Number(activeNetworkChainIconsConfig?.size ?? 0);
   const activeNetworkChainIconFileType = activeNetworkChainIconsConfig?.fileType ?? 'webp';
@@ -265,6 +326,11 @@ export default function UserMenu() {
     const iconSymbol = activeNetworkChainIconSymbolByKey[chainKey];
     if (!iconSymbol || !activeNetworkChainIconFileType || !activeNetworkChainIconFileSize) return null;
     return `/image/tokens/${activeNetworkChainIconFileType}/${activeNetworkChainIconFileSize}/${iconSymbol}.${activeNetworkChainIconFileType}`;
+  };
+  const resolveActiveNetworkMenuChainIconSrc = (chainKey: ChainKey): string | null => {
+    const iconSymbol = activeNetworkChainIconSymbolByKey[chainKey];
+    if (!iconSymbol || !activeNetworkMenuChainIconFileType || !activeNetworkMenuChainIconFileSize) return null;
+    return `/image/tokens/${activeNetworkMenuChainIconFileType}/${activeNetworkMenuChainIconFileSize}/${iconSymbol}.${activeNetworkMenuChainIconFileType}`;
   };
   const resolveChainIconSrcByConfig = (
     chainKey: ChainKey | 'ALL',
@@ -948,8 +1014,6 @@ export default function UserMenu() {
     );
   }, [walletChainKeySet, walletDropdownChain, addPanelChain, fallbackWalletChain, setAddPanelChain, setWalletPanels]);
 
-  if (!authenticated) return null;
-
   const showSwapMessage = (message: { type: 'success' | 'error'; text: string }) => {
     setSwapMessage(message);
     window.setTimeout(() => {
@@ -1253,6 +1317,31 @@ export default function UserMenu() {
     return `/image/tokens/${tokenIconFileType}/${tokenIconFileSize}/${symbol}.${tokenIconFileType}`;
   };
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const preload = (src: string) => {
+      const image = new window.Image();
+      image.src = src;
+    };
+
+    const urls = new Set<string>();
+
+    const selectedChainIconSrc = resolveActiveNetworkMenuChainIconSrc(selectedChain)
+      ?? resolveActiveNetworkChainIconSrc(selectedChain);
+    if (selectedChainIconSrc) {
+      urls.add(selectedChainIconSrc);
+    }
+
+    const topTokenSymbols = resolveTokenRows(walletDropdownChain).slice(0, 5);
+    topTokenSymbols.forEach((symbol) => {
+      const iconSrc = resolveTokenIconSrc(symbol);
+      if (iconSrc) urls.add(iconSrc);
+    });
+
+    urls.forEach(preload);
+  }, [selectedChain, walletDropdownChain]);
+
   const placeholderCircleStyle: React.CSSProperties = {
     width: `${tokenIconSize}px`,
     height: `${tokenIconSize}px`,
@@ -1311,16 +1400,12 @@ export default function UserMenu() {
                       }}
                     />
                   ) : (
-                    <img
+                    <Image
                       src={iconSrc}
                       alt={symbol}
-                      style={{
-                        position: 'absolute',
-                        inset: 0,
-                        width: '100%',
-                        height: '100%',
-                        objectFit: 'contain',
-                      }}
+                      width={tokenIconSize}
+                      height={tokenIconSize}
+                      className="absolute inset-0 h-full w-full object-contain"
                       onError={(e) => {
                         const img = e.currentTarget as HTMLImageElement;
                         img.style.display = 'none';
@@ -1756,6 +1841,8 @@ export default function UserMenu() {
     />
   );
 
+  if (!authenticated) return null;
+
   return (
     <div className="relative flex items-center gap-3" ref={menuRef}>
       {swapMessage && (
@@ -1796,11 +1883,101 @@ export default function UserMenu() {
             ['--highlight-color' as never]: MENU_ICONS.highlight_color,
           }}
         >
-          <Globe2
-            className=""
-            style={{ width: `${MENU_ICONS.size * 4}px`, height: `${MENU_ICONS.size * 4}px` }}
-            color={MENU_ICONS.icon_color}
-          />
+          {activeNetworkMenuChainIconEnabled ? (
+            <div
+              className="relative flex items-center justify-center shrink-0"
+              style={{
+                width: `${activeNetworkMenuChainIconSize}px`,
+                height: `${activeNetworkMenuChainIconSize}px`,
+                borderRadius: '50%',
+                backgroundColor: activeNetworkMenuChainIconPlaceholderColor,
+                ...resolveIconBorderStyle(
+                  activeNetworkMenuChainIconBorderPosition,
+                  activeNetworkMenuChainIconBorderColor,
+                  activeNetworkMenuChainIconBorderWidth
+                ),
+                overflow: 'hidden',
+              }}
+            >
+              {(() => {
+                const iconSrc = resolveActiveNetworkMenuChainIconSrc(selectedChain);
+                if (!iconSrc) {
+                  return (
+                    <span
+                      style={{
+                        position: 'absolute',
+                        inset: 0,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: `${activeNetworkMenuChainIconPlaceholderFontSize}px`,
+                        color: activeNetworkMenuChainIconPlaceholderFontColor,
+                        userSelect: 'none',
+                        pointerEvents: 'none',
+                      }}
+                    >
+                      ?
+                    </span>
+                  );
+                }
+
+                return (
+                  <>
+                    {activeNetworkMenuChainIconSpinEnabled ? (
+                      <SpinningLogo
+                        src={iconSrc}
+                        alt={selectedNetworkLabel}
+                        width={activeNetworkMenuChainIconSize}
+                        height={activeNetworkMenuChainIconSize}
+                        className="absolute inset-0 h-full w-full object-contain"
+                        onError={(e) => {
+                          const img = e.currentTarget as HTMLImageElement;
+                          img.style.display = 'none';
+                          const fallback = img.nextSibling as HTMLElement | null;
+                          if (fallback) fallback.style.display = 'flex';
+                        }}
+                      />
+                    ) : (
+                      <Image
+                        src={iconSrc}
+                        alt={selectedNetworkLabel}
+                        width={activeNetworkMenuChainIconSize}
+                        height={activeNetworkMenuChainIconSize}
+                        className="absolute inset-0 h-full w-full object-contain"
+                        onError={(e) => {
+                          const img = e.currentTarget as HTMLImageElement;
+                          img.style.display = 'none';
+                          const fallback = img.nextSibling as HTMLElement | null;
+                          if (fallback) fallback.style.display = 'flex';
+                        }}
+                      />
+                    )}
+                    <span
+                      style={{
+                        display: 'none',
+                        position: 'absolute',
+                        inset: 0,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: `${activeNetworkMenuChainIconPlaceholderFontSize}px`,
+                        color: activeNetworkMenuChainIconPlaceholderFontColor,
+                        userSelect: 'none',
+                        pointerEvents: 'none',
+                      }}
+                    >
+                      ?
+                    </span>
+                  </>
+                );
+              })()}
+            </div>
+          ) : (
+            <Globe2
+              className=""
+              style={{ width: `${MENU_ICONS.size * 4}px`, height: `${MENU_ICONS.size * 4}px` }}
+              color={MENU_ICONS.icon_color}
+            />
+          )}
           <span
             className="whitespace-nowrap leading-none"
             style={{
@@ -1889,16 +2066,12 @@ export default function UserMenu() {
                             }}
                           />
                         ) : (
-                          <img
+                          <Image
                             src={iconSrc}
                             alt={label}
-                            style={{
-                              position: 'absolute',
-                              inset: 0,
-                              width: '100%',
-                              height: '100%',
-                              objectFit: 'contain',
-                            }}
+                            width={activeNetworkChainIconSize}
+                            height={activeNetworkChainIconSize}
+                            className="absolute inset-0 h-full w-full object-contain"
                             onError={(e) => {
                               const img = e.currentTarget as HTMLImageElement;
                               img.style.display = 'none';
@@ -2116,16 +2289,12 @@ export default function UserMenu() {
                                   }}
                                 />
                               ) : (
-                                <img
+                                <Image
                                   src={chainIconSrc}
                                   alt={option.label}
-                                  style={{
-                                    position: 'absolute',
-                                    inset: 0,
-                                    width: '100%',
-                                    height: '100%',
-                                    objectFit: 'contain',
-                                  }}
+                                  width={walletChainIconSize}
+                                  height={walletChainIconSize}
+                                  className="absolute inset-0 h-full w-full object-contain"
                                   onError={(e) => {
                                     const img = e.currentTarget as HTMLImageElement;
                                     img.style.display = 'none';

@@ -26,9 +26,26 @@ export const ACTIVE_NETWORK_DROPDOWN = {
   selectedItemColor: '#1f2937',
   allCaps: true,
   letterSpacing: '0.3em',
+  MENU_ICONS_override: {
+    buttonText: {
+      
+    },
+    chainIcon: {
+      fileType: 'webp',
+      fileSize: '64px',
+      size: 25,
+      borderPosition: 'outer',
+      borderColor: null,
+      borderWidth: null,
+      placeholderColor: '#1F2937',
+      placeholderFontColor: '#d1d5db',
+      placeholderFontSize: 14,
+      spin: true,
+    },
+  },
   chainIcons: {
     fileType: 'webp',
-    fileSize: '128px',
+    fileSize: '64px',
     size: 23,
     borderPosition: 'outer',
     borderColor: null,
@@ -77,7 +94,7 @@ export const WALLET_DISPLAY = { // Wallet panel/dropdown sizing and typography c
   },
   tokenIcons: { // Token icon config used in renderBalances in UserMenu.tsx
     fileType: 'webp', // Image file extension in UserMenu.tsx
-    fileSize: '128px', // Subfolder name under public/image/tokens/<fileType>/ in UserMenu.tsx
+    fileSize: '64px', // Subfolder name under public/image/tokens/<fileType>/ in UserMenu.tsx
     size: 25, // Rendered icon size in pixels in UserMenu.tsx
     borderPosition: 'inner',
     borderColor: null,
@@ -89,7 +106,7 @@ export const WALLET_DISPLAY = { // Wallet panel/dropdown sizing and typography c
   },
   chainIcons: {
     fileType: 'webp',
-    fileSize: '128px',
+    fileSize: '64px',
     size: 20,
     borderPosition: 'outer',
     borderColor: null,
@@ -106,7 +123,7 @@ export const WALLET_DISPLAY = { // Wallet panel/dropdown sizing and typography c
     fontName: 'monospace', // Title font family in UserMenu.tsx
     chainIcon: {
       fileType: 'webp',
-      fileSize: '128px',
+      fileSize: '64px',
       size: 15,
       borderPosition: 'outer',
       borderColor: null,
@@ -354,7 +371,7 @@ export const ADD_PANEL_DISPLAY = { // ADD_PANEL sizing, label, and icon styles i
   },
   chainIcons: {
     fileType: 'webp',
-    fileSize: '128px',
+    fileSize: '64px',
     size: 20,
     borderPosition: 'outer',
     borderColor: null,
