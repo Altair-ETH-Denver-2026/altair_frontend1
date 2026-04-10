@@ -337,7 +337,7 @@ export default function UserMenu() {
     fileType: string,
     fileSize: string
   ): string | null => {
-    if (chainKey === 'ALL') return null;
+    if (chainKey === 'ALL') return '/globe.svg';
     const iconSymbol = activeNetworkChainIconSymbolByKey[chainKey];
     if (!iconSymbol || !fileType || !fileSize) return null;
     return `/image/tokens/${fileType}/${fileSize}/${iconSymbol}.${fileType}`;
