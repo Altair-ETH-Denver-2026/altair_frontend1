@@ -39,6 +39,7 @@ export const BASE_SEPOLIA = {
   name: 'Base Sepolia',
   isTestnet: true,
   chainId: 84532, // Base Sepolia chain ID used to initialize EVM providers
+  iconSymbol: 'BASE',
   rpcUrls: [
     `https://base-sepolia.g.alchemy.com/v2/${ALCHEMY_API_KEY_PLACEHOLDER}`, // primary Base Sepolia RPC (Alchemy)
     'https://sepolia.base.org', // fallback Base Sepolia RPC for redundancy
@@ -55,6 +56,7 @@ export const ETH_SEPOLIA = {
   name: 'Sepolia',
   isTestnet: true,
   chainId: 11155111, // Ethereum Sepolia chain ID for testnet EVM operations
+  iconSymbol: 'ETH',
   rpcUrls: [
     `https://eth-sepolia.g.alchemy.com/v2/${ALCHEMY_API_KEY_PLACEHOLDER}`, // primary Ethereum Sepolia RPC (Alchemy)
     'https://rpc.sepolia.org', // fallback Sepolia RPC endpoint
@@ -71,6 +73,7 @@ export const ETH_MAINNET = {
   name: 'Ethereum Mainnet',
   isTestnet: false,
   chainId: 1, // Ethereum mainnet chain ID for production EVM connections
+  iconSymbol: 'ETH',
   rpcUrls: [
     `https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY_PLACEHOLDER}`, // primary Ethereum mainnet RPC (Alchemy)
     'https://cloudflare-eth.com', // public fallback Ethereum RPC
@@ -87,6 +90,7 @@ export const BASE_MAINNET = {
   name: 'Base Mainnet',
   isTestnet: false,
   chainId: 8453, // Base mainnet chain ID for production EVM connections
+  iconSymbol: 'BASE',
   rpcUrls: [
     `https://base-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY_PLACEHOLDER}`, // primary Base mainnet RPC (Alchemy)
     'https://mainnet.base.org', // public fallback Base RPC endpoint
@@ -103,6 +107,7 @@ export const SOLANA_MAINNET = {
   name: 'Solana Mainnet',
   isTestnet: false,
   chainId: 792703809,
+  iconSymbol: 'SOL',
   rpcUrls: [
     `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY_PLACEHOLDER}`,
     'https://api.mainnet-beta.solana.com/', // Solana mainnet RPC for wallet, balances, and swap routes
@@ -114,6 +119,7 @@ export const SOLANA_DEVNET = {
   name: 'Solana Devnet',
   isTestnet: true,
   chainId: 901,
+  iconSymbol: 'SOL',
   rpcUrls: [
     'https://api.devnet.solana.com/', // Solana devnet RPC for wallet, balances, and swap routes
   ],

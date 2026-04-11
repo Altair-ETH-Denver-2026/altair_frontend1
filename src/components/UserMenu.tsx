@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
+import Image from 'next/image';
 import { ethers } from 'ethers';
 import { usePrivy, useWallets } from '@privy-io/react-auth';
 import { useWallets as useSolanaWallets, useSignAndSendTransaction } from '@privy-io/react-auth/solana';
@@ -14,6 +15,7 @@ import { PublicKey } from '@solana/web3.js';
 import { UserRound, LogOut, Settings, Wallet, Wrench, Copy, Globe2, Check } from 'lucide-react';
 import WalletPanel from './panels/WalletPanel';
 import AddPanel from './panels/AddPanel';
+import { SpinningLogo } from './SpinningLogo';
 import { useEffect as useClientEffect } from 'react';
 import { BLOCKCHAIN, CHAINS, GAS_RESERVES, GAS_TOKENS, FORCE_QUERY_CHAINS, type ChainKey } from '../../config/blockchain_config';
 import { BASE_MAINNET, BASE_SEPOLIA, ETH_MAINNET, ETH_SEPOLIA, SOLANA_MAINNET, SOLANA_DEVNET, resolveRpcUrls } from '../../config/chain_info';
@@ -104,6 +106,7 @@ export default function UserMenu() {
   const tokenRowConfig = WALLET_DISPLAY.rows;
   const tokenSymbolsConfig = WALLET_DISPLAY.tokenSymbols;
   const tokenBalancesConfig = WALLET_DISPLAY.tokenBalances;
+  const tokenIconsConfig = WALLET_DISPLAY.tokenIcons;
   const tokenRowPaddingTop = tokenRowConfig.paddingTop * buttonSize;
   const tokenRowPaddingBottom = tokenRowConfig.paddingBottom * buttonSize;
   const tokenSymbolFontSize = tokenSymbolsConfig.fontSize * buttonSize;
@@ -113,12 +116,40 @@ export default function UserMenu() {
   const tokenBalanceFontFamily = tokenBalancesConfig.fontName;
   const tokenBalanceColor = tokenBalancesConfig.color;
   const tokenBalanceDecimals = tokenBalancesConfig.decimals;
+  const tokenIconSize = Number(tokenIconsConfig.size) * buttonSize;
+  const tokenIconFileType = tokenIconsConfig.fileType;
+  const tokenIconFileSize = tokenIconsConfig.fileSize;
+  const tokenIconBorderPosition = tokenIconsConfig.borderPosition ?? 'inner';
+  const tokenIconBorderColor =
+    typeof tokenIconsConfig.borderColor === 'string' ? tokenIconsConfig.borderColor : null;
+  const tokenIconBorderWidth =
+    typeof (tokenIconsConfig as unknown as Record<string, unknown>).borderSize === 'number'
+      ? Number((tokenIconsConfig as unknown as Record<string, unknown>).borderSize)
+      : typeof tokenIconsConfig.borderWidth === 'number'
+        ? tokenIconsConfig.borderWidth
+        : null;
+  const tokenIconPlaceholderColor = tokenIconsConfig.placeholderColor;
+  const tokenIconPlaceholderFontColor = tokenIconsConfig.placeholderFontColor;
+  const tokenIconPlaceholderFontSize = Number(
+    tokenIconsConfig.placeholderFontSize ?? Math.round(tokenIconSize * 0.55)
+  );
+  const tokenIconSpinEnabled = Boolean(tokenIconsConfig.spin);
   const walletWidth = WALLET_DISPLAY.width;
   const titleConfig = WALLET_DISPLAY.title;
   const titlePaddingTop = titleConfig.paddingTop * buttonSize;
   const titlePaddingBottom = titleConfig.paddingBottom * buttonSize;
   const titleFontSize = titleConfig.fontSize * buttonSize;
   const titleFontFamily = titleConfig.fontName;
+  const titleChainIconConfig = (titleConfig as unknown as { chainIcon?: Record<string, unknown> }).chainIcon;
+  const titleChainIconSize = Number(titleChainIconConfig?.size ?? 25) * buttonSize;
+  const titleChainIconBorderPosition =
+    typeof titleChainIconConfig?.borderPosition === 'string' ? titleChainIconConfig.borderPosition : 'inner';
+  const titleChainIconBorderColor = typeof titleChainIconConfig?.borderColor === 'string' ? titleChainIconConfig.borderColor : null;
+  const titleChainIconBorderWidth = typeof titleChainIconConfig?.borderWidth === 'number' ? titleChainIconConfig.borderWidth : null;
+  const titleChainIconPlaceholderColor = typeof titleChainIconConfig?.placeholderColor === 'string' ? titleChainIconConfig.placeholderColor : '#1F2937';
+  const titleChainIconPlaceholderFontColor = typeof titleChainIconConfig?.placeholderFontColor === 'string' ? titleChainIconConfig.placeholderFontColor : '#d1d5db';
+  const titleChainIconPlaceholderFontSize = typeof titleChainIconConfig?.placeholderFontSize === 'number' ? titleChainIconConfig.placeholderFontSize : 14;
+  const titleChainIconSpinEnabled = Boolean(titleChainIconConfig?.spin);
   const closeConfig = WALLET_DISPLAY.x;
   const closePaddingTop = closeConfig.paddingTop * buttonSize;
   const closePaddingRight = closeConfig.paddingRight * buttonSize;
@@ -127,6 +158,20 @@ export default function UserMenu() {
   const chainDropdownConfig = WALLET_DISPLAY.chainDropdown;
   const chainDropdownWidth = chainDropdownConfig.width * buttonSize;
   const chainDropdownFontSize = chainDropdownConfig.fontSize * buttonSize;
+  const chainDropdownItemColor = chainDropdownConfig.itemColor ?? '#111827';
+  const chainDropdownItemHighlightColor = chainDropdownConfig.itemHighlightColor ?? '#1f2937';
+  const walletChainIconsConfig = (WALLET_DISPLAY as unknown as { chainIcons?: Record<string, unknown> }).chainIcons;
+  const walletChainIconSize = Number(walletChainIconsConfig?.size ?? 25) * buttonSize;
+  const walletChainIconFileType = typeof walletChainIconsConfig?.fileType === 'string' ? walletChainIconsConfig.fileType : 'webp';
+  const walletChainIconFileSize = typeof walletChainIconsConfig?.fileSize === 'string' ? walletChainIconsConfig.fileSize : '128px';
+  const walletChainIconBorderPosition =
+    typeof walletChainIconsConfig?.borderPosition === 'string' ? walletChainIconsConfig.borderPosition : 'inner';
+  const walletChainIconBorderColor = typeof walletChainIconsConfig?.borderColor === 'string' ? walletChainIconsConfig.borderColor : null;
+  const walletChainIconBorderWidth = typeof walletChainIconsConfig?.borderWidth === 'number' ? walletChainIconsConfig.borderWidth : null;
+  const walletChainIconPlaceholderColor = typeof walletChainIconsConfig?.placeholderColor === 'string' ? walletChainIconsConfig.placeholderColor : '#1F2937';
+  const walletChainIconPlaceholderFontColor = typeof walletChainIconsConfig?.placeholderFontColor === 'string' ? walletChainIconsConfig.placeholderFontColor : '#d1d5db';
+  const walletChainIconPlaceholderFontSize = typeof walletChainIconsConfig?.placeholderFontSize === 'number' ? walletChainIconsConfig.placeholderFontSize : 14;
+  const walletChainIconSpinEnabled = Boolean(walletChainIconsConfig?.spin);
   const tokenDropdownConfig = WALLET_DISPLAY.tokenDropdown ?? { width: chainDropdownWidth, fontSize: 12, fontName: 'sans-serif' };
   const tokenDropdownWidthRaw = tokenDropdownConfig.width ?? chainDropdownWidth;
   const tokenDropdownWidthValue = tokenDropdownWidthRaw ? tokenDropdownWidthRaw : '100%';
@@ -170,10 +215,150 @@ export default function UserMenu() {
   const withdrawCancelHighlightColor = withdrawCancelButtonConfig.highlightColor ?? withdrawCancelButtonConfig.buttonColor;
   const withdrawCancelActiveColor = withdrawCancelButtonConfig.activeColor ?? withdrawCancelButtonConfig.buttonColor;
   const withdrawCancelActiveBorderColor = withdrawCancelButtonConfig.activeBorderColor ?? withdrawCancelButtonConfig.borderColor;
+  const activeNetworkMenuIconsOverride = (
+    ACTIVE_NETWORK_DROPDOWN as unknown as {
+      MENU_ICONS_override?: {
+        buttonText?: Record<string, unknown>;
+        chainIcon?: Record<string, unknown>;
+      };
+    }
+  ).MENU_ICONS_override;
   const menuButtonTextConfig = MENU_ICONS.buttonText ?? { fontSize: 13, fontName: 'sans-serif', fontColor: '#f3f4f6' };
-  const menuButtonTextFontSize = Number(menuButtonTextConfig.fontSize ?? 13);
-  const menuButtonTextFontFamily = menuButtonTextConfig.fontName ?? 'sans-serif';
-  const menuButtonTextFontColor = menuButtonTextConfig.fontColor ?? '#f3f4f6';
+  const activeNetworkMenuButtonTextConfig = activeNetworkMenuIconsOverride?.buttonText ?? {};
+  const menuButtonTextFontSize = Number(
+    typeof activeNetworkMenuButtonTextConfig.fontSize === 'number'
+      ? activeNetworkMenuButtonTextConfig.fontSize
+      : menuButtonTextConfig.fontSize ?? 13
+  );
+  const menuButtonTextFontFamily =
+    typeof activeNetworkMenuButtonTextConfig.fontName === 'string'
+      ? activeNetworkMenuButtonTextConfig.fontName
+      : menuButtonTextConfig.fontName ?? 'sans-serif';
+  const menuButtonTextFontColor =
+    typeof activeNetworkMenuButtonTextConfig.fontColor === 'string'
+      ? activeNetworkMenuButtonTextConfig.fontColor
+      : menuButtonTextConfig.fontColor ?? '#f3f4f6';
+  const activeNetworkMenuChainIconConfig = activeNetworkMenuIconsOverride?.chainIcon;
+  const activeNetworkMenuChainIconEnabled = Boolean(activeNetworkMenuChainIconConfig);
+  const activeNetworkMenuChainIconSize = Number(
+    typeof activeNetworkMenuChainIconConfig?.size === 'number'
+      ? activeNetworkMenuChainIconConfig.size
+      : MENU_ICONS.size * 4
+  );
+  const activeNetworkMenuChainIconFileType =
+    typeof activeNetworkMenuChainIconConfig?.fileType === 'string'
+      ? activeNetworkMenuChainIconConfig.fileType
+      : 'webp';
+  const activeNetworkMenuChainIconFileSize =
+    typeof activeNetworkMenuChainIconConfig?.fileSize === 'string'
+      ? activeNetworkMenuChainIconConfig.fileSize
+      : '128px';
+  const activeNetworkMenuChainIconBorderPosition =
+    typeof activeNetworkMenuChainIconConfig?.borderPosition === 'string'
+      ? activeNetworkMenuChainIconConfig.borderPosition
+      : 'inner';
+  const activeNetworkMenuChainIconBorderColor =
+    typeof activeNetworkMenuChainIconConfig?.borderColor === 'string'
+      ? activeNetworkMenuChainIconConfig.borderColor
+      : null;
+  const activeNetworkMenuChainIconBorderWidth =
+    typeof activeNetworkMenuChainIconConfig?.borderWidth === 'number'
+      ? activeNetworkMenuChainIconConfig.borderWidth
+      : null;
+  const activeNetworkMenuChainIconPlaceholderColor =
+    typeof activeNetworkMenuChainIconConfig?.placeholderColor === 'string'
+      ? activeNetworkMenuChainIconConfig.placeholderColor
+      : '#1F2937';
+  const activeNetworkMenuChainIconPlaceholderFontColor =
+    typeof activeNetworkMenuChainIconConfig?.placeholderFontColor === 'string'
+      ? activeNetworkMenuChainIconConfig.placeholderFontColor
+      : '#d1d5db';
+  const activeNetworkMenuChainIconPlaceholderFontSize = Number(
+    typeof activeNetworkMenuChainIconConfig?.placeholderFontSize === 'number'
+      ? activeNetworkMenuChainIconConfig.placeholderFontSize
+      : Math.round(activeNetworkMenuChainIconSize * 0.55)
+  );
+  const activeNetworkMenuChainIconSpinEnabled = Boolean(activeNetworkMenuChainIconConfig?.spin);
+  const activeNetworkChainIconsConfig = ACTIVE_NETWORK_DROPDOWN.chainIcons;
+  const activeNetworkChainIconSize = Number(activeNetworkChainIconsConfig?.size ?? 0);
+  const activeNetworkChainIconFileType = activeNetworkChainIconsConfig?.fileType ?? 'webp';
+  const activeNetworkChainIconFileSize = activeNetworkChainIconsConfig?.fileSize ?? '128px';
+  const activeNetworkChainIconPlaceholderColor = activeNetworkChainIconsConfig?.placeholderColor ?? '#1F2937';
+  const activeNetworkChainIconPlaceholderFontColor = activeNetworkChainIconsConfig?.placeholderFontColor ?? '#d1d5db';
+  const activeNetworkChainIconPlaceholderFontSize = Number(
+    activeNetworkChainIconsConfig?.placeholderFontSize ?? Math.round(activeNetworkChainIconSize * 0.55)
+  );
+  const activeNetworkChainIconBorderPosition =
+    typeof activeNetworkChainIconsConfig?.borderPosition === 'string'
+      ? activeNetworkChainIconsConfig.borderPosition
+      : 'inner';
+  const activeNetworkChainIconBorderColor =
+    typeof activeNetworkChainIconsConfig?.borderColor === 'string'
+      ? activeNetworkChainIconsConfig.borderColor
+      : null;
+  const activeNetworkChainIconBorderWidth =
+    typeof activeNetworkChainIconsConfig?.borderWidth === 'number'
+      ? activeNetworkChainIconsConfig.borderWidth
+      : null;
+  const activeNetworkChainIconSelectedBorderEnabled = Boolean(activeNetworkChainIconsConfig?.selectedBorder);
+  const activeNetworkChainIconSelectedBorderColor =
+    typeof activeNetworkChainIconsConfig?.selectedBorderColor === 'string'
+      ? activeNetworkChainIconsConfig.selectedBorderColor
+      : '#09ff00';
+  const activeNetworkChainIconSelectedBorderWidth =
+    typeof activeNetworkChainIconsConfig?.selectedBorderWidth === 'number'
+      ? activeNetworkChainIconsConfig.selectedBorderWidth
+      : 1;
+  const activeNetworkChainIconSelectedPlaceholder =
+    activeNetworkChainIconsConfig?.selectedPlaceholder !== false;
+  const activeNetworkSelectedItemColor =
+    ACTIVE_NETWORK_DROPDOWN.selectedItemColor ?? ACTIVE_NETWORK_DROPDOWN.itemHighlightColor;
+  const activeNetworkChainIconSpinEnabled = Boolean(activeNetworkChainIconsConfig?.spin);
+  const activeNetworkChainIconSymbolByKey: Partial<Record<ChainKey, string>> = {
+    BASE_MAINNET: BASE_MAINNET.iconSymbol,
+    BASE_SEPOLIA: BASE_SEPOLIA.iconSymbol,
+    ETH_MAINNET: ETH_MAINNET.iconSymbol,
+    ETH_SEPOLIA: ETH_SEPOLIA.iconSymbol,
+    SOLANA_MAINNET: SOLANA_MAINNET.iconSymbol,
+    SOLANA_DEVNET: SOLANA_DEVNET.iconSymbol,
+  };
+  const resolveActiveNetworkChainIconSrc = (chainKey: ChainKey): string | null => {
+    const iconSymbol = activeNetworkChainIconSymbolByKey[chainKey];
+    if (!iconSymbol || !activeNetworkChainIconFileType || !activeNetworkChainIconFileSize) return null;
+    return `/image/tokens/${activeNetworkChainIconFileType}/${activeNetworkChainIconFileSize}/${iconSymbol}.${activeNetworkChainIconFileType}`;
+  };
+  const resolveActiveNetworkMenuChainIconSrc = (chainKey: ChainKey): string | null => {
+    const iconSymbol = activeNetworkChainIconSymbolByKey[chainKey];
+    if (!iconSymbol || !activeNetworkMenuChainIconFileType || !activeNetworkMenuChainIconFileSize) return null;
+    return `/image/tokens/${activeNetworkMenuChainIconFileType}/${activeNetworkMenuChainIconFileSize}/${iconSymbol}.${activeNetworkMenuChainIconFileType}`;
+  };
+  const resolveChainIconSrcByConfig = (
+    chainKey: ChainKey | 'ALL',
+    fileType: string,
+    fileSize: string
+  ): string | null => {
+    if (chainKey === 'ALL') return '/globe.svg';
+    const iconSymbol = activeNetworkChainIconSymbolByKey[chainKey];
+    if (!iconSymbol || !fileType || !fileSize) return null;
+    return `/image/tokens/${fileType}/${fileSize}/${iconSymbol}.${fileType}`;
+  };
+  const resolveIconBorderStyle = (
+    borderPosition: string,
+    borderColor: string | null,
+    borderWidth: number | null
+  ): React.CSSProperties => {
+    if (!borderColor || borderWidth === null || borderWidth <= 0) return {};
+    if (borderPosition === 'outer') {
+      return {
+        boxShadow: `0 0 0 ${borderWidth}px ${borderColor}`,
+      };
+    }
+    return {
+      borderStyle: 'solid',
+      borderColor,
+      borderWidth: `${borderWidth}px`,
+    };
+  };
   const {
     activeNetworkOptions,
     walletChainOptions,
@@ -293,6 +478,25 @@ export default function UserMenu() {
   const addPanelChainDropdownConfig = ADD_PANEL_DISPLAY.chainDropdown;
   const addPanelChainDropdownWidth = addPanelChainDropdownConfig.width;
   const addPanelChainDropdownFontSize = addPanelChainDropdownConfig.fontSize;
+  const addPanelChainDropdownFontName = addPanelChainDropdownConfig.fontName ?? addPanelLabelFontFamily;
+  const addPanelChainDropdownFontColor = addPanelChainDropdownConfig.fontColor ?? '#d1d5db';
+  const addPanelChainDropdownAllCaps = addPanelChainDropdownConfig.allCaps ?? true;
+  const addPanelChainDropdownLetterSpacing = addPanelChainDropdownConfig.letterSpacing ?? '0.3em';
+  const addPanelChainDropdownItemColor = addPanelChainDropdownConfig.itemColor ?? '#111827';
+  const addPanelChainDropdownItemHighlightColor = addPanelChainDropdownConfig.itemHighlightColor ?? '#1f2937';
+  const addPanelChainDropdownItemHeight = Number(addPanelChainDropdownConfig.itemHeight ?? 32);
+  const addPanelChainIconsConfig = (ADD_PANEL_DISPLAY as unknown as { chainIcons?: Record<string, unknown> }).chainIcons;
+  const addPanelChainIconSize = Number(addPanelChainIconsConfig?.size ?? 25);
+  const addPanelChainIconFileType = typeof addPanelChainIconsConfig?.fileType === 'string' ? addPanelChainIconsConfig.fileType : 'webp';
+  const addPanelChainIconFileSize = typeof addPanelChainIconsConfig?.fileSize === 'string' ? addPanelChainIconsConfig.fileSize : '128px';
+  const addPanelChainIconBorderPosition =
+    typeof addPanelChainIconsConfig?.borderPosition === 'string' ? addPanelChainIconsConfig.borderPosition : 'inner';
+  const addPanelChainIconBorderColor = typeof addPanelChainIconsConfig?.borderColor === 'string' ? addPanelChainIconsConfig.borderColor : null;
+  const addPanelChainIconBorderWidth = typeof addPanelChainIconsConfig?.borderWidth === 'number' ? addPanelChainIconsConfig.borderWidth : null;
+  const addPanelChainIconPlaceholderColor = typeof addPanelChainIconsConfig?.placeholderColor === 'string' ? addPanelChainIconsConfig.placeholderColor : '#1F2937';
+  const addPanelChainIconPlaceholderFontColor = typeof addPanelChainIconsConfig?.placeholderFontColor === 'string' ? addPanelChainIconsConfig.placeholderFontColor : '#d1d5db';
+  const addPanelChainIconPlaceholderFontSize = typeof addPanelChainIconsConfig?.placeholderFontSize === 'number' ? addPanelChainIconsConfig.placeholderFontSize : 14;
+  const addPanelChainIconSpinEnabled = Boolean(addPanelChainIconsConfig?.spin);
   const formatDisplayAddress = (address: string) => {
     if (!address) return '—';
     const isEvm = address.startsWith('0x');
@@ -810,8 +1014,6 @@ export default function UserMenu() {
     );
   }, [walletChainKeySet, walletDropdownChain, addPanelChain, fallbackWalletChain, setAddPanelChain, setWalletPanels]);
 
-  if (!authenticated) return null;
-
   const showSwapMessage = (message: { type: 'success' | 'error'; text: string }) => {
     setSwapMessage(message);
     window.setTimeout(() => {
@@ -1110,10 +1312,65 @@ export default function UserMenu() {
       }
     }
   };
+  const resolveTokenIconSrc = (symbol: string): string | null => {
+    if (!symbol || !tokenIconFileType || !tokenIconFileSize) return null;
+    return `/image/tokens/${tokenIconFileType}/${tokenIconFileSize}/${symbol}.${tokenIconFileType}`;
+  };
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const preload = (src: string) => {
+      const image = new window.Image();
+      image.src = src;
+    };
+
+    const urls = new Set<string>();
+
+    const selectedChainIconSrc = resolveActiveNetworkMenuChainIconSrc(selectedChain)
+      ?? resolveActiveNetworkChainIconSrc(selectedChain);
+    if (selectedChainIconSrc) {
+      urls.add(selectedChainIconSrc);
+    }
+
+    const topTokenSymbols = resolveTokenRows(walletDropdownChain).slice(0, 5);
+    topTokenSymbols.forEach((symbol) => {
+      const iconSrc = resolveTokenIconSrc(symbol);
+      if (iconSrc) urls.add(iconSrc);
+    });
+
+    urls.forEach(preload);
+  }, [selectedChain, walletDropdownChain]);
+
+  const placeholderCircleStyle: React.CSSProperties = {
+    width: `${tokenIconSize}px`,
+    height: `${tokenIconSize}px`,
+    borderRadius: '50%',
+    backgroundColor: tokenIconPlaceholderColor,
+    ...resolveIconBorderStyle(tokenIconBorderPosition, tokenIconBorderColor, tokenIconBorderWidth),
+    flexShrink: 0,
+    marginRight: `${Math.round(tokenIconSize * 0.4)}px`,
+    position: 'relative',
+    overflow: 'hidden',
+  };
+
+  const questionMarkStyle: React.CSSProperties = {
+    position: 'absolute',
+    inset: 0,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: `${tokenIconPlaceholderFontSize}px`,
+    color: tokenIconPlaceholderFontColor,
+    userSelect: 'none',
+    pointerEvents: 'none',
+  };
+
   const renderBalances = (chainKey: ChainKey | 'ALL') => {
     const rows = resolveTokenRows(chainKey);
     return rows.map((symbol, index) => {
       const balanceValue = resolveBalanceForSymbol(chainKey, symbol);
+      const iconSrc = resolveTokenIconSrc(symbol);
       return (
         <React.Fragment key={symbol}>
           <div
@@ -1125,6 +1382,44 @@ export default function UserMenu() {
               paddingBottom: `${tokenRowPaddingBottom}px`,
             }}
           >
+            <div style={placeholderCircleStyle}>
+              {iconSrc ? (
+                <>
+                  {tokenIconSpinEnabled ? (
+                    <SpinningLogo
+                      src={iconSrc}
+                      alt={symbol}
+                      width={tokenIconSize}
+                      height={tokenIconSize}
+                      className="absolute inset-0 h-full w-full object-contain"
+                      onError={(e) => {
+                        const img = e.currentTarget as HTMLImageElement;
+                        img.style.display = 'none';
+                        const fallback = img.nextSibling as HTMLElement | null;
+                        if (fallback) fallback.style.display = 'flex';
+                      }}
+                    />
+                  ) : (
+                    <Image
+                      src={iconSrc}
+                      alt={symbol}
+                      width={tokenIconSize}
+                      height={tokenIconSize}
+                      className="absolute inset-0 h-full w-full object-contain"
+                      onError={(e) => {
+                        const img = e.currentTarget as HTMLImageElement;
+                        img.style.display = 'none';
+                        const fallback = img.nextSibling as HTMLElement | null;
+                        if (fallback) fallback.style.display = 'flex';
+                      }}
+                    />
+                  )}
+                  <span style={{ ...questionMarkStyle, display: 'none' }}>?</span>
+                </>
+              ) : (
+                <span style={questionMarkStyle}>?</span>
+              )}
+            </div>
             <span
               className="flex-1"
               style={{
@@ -1199,8 +1494,29 @@ export default function UserMenu() {
       containerPaddingRight={containerPaddingRight}
       titleFontSize={titleFontSize}
       titleFontFamily={titleFontFamily}
+      titleChainIconSize={titleChainIconSize}
+      titleChainIconBorderPosition={titleChainIconBorderPosition}
+      titleChainIconBorderColor={titleChainIconBorderColor}
+      titleChainIconBorderWidth={titleChainIconBorderWidth}
+      titleChainIconPlaceholderColor={titleChainIconPlaceholderColor}
+      titleChainIconPlaceholderFontColor={titleChainIconPlaceholderFontColor}
+      titleChainIconPlaceholderFontSize={titleChainIconPlaceholderFontSize}
+      titleChainIconSpinEnabled={titleChainIconSpinEnabled}
       chainDropdownFontSize={chainDropdownFontSize}
       chainDropdownWidth={chainDropdownWidth}
+      chainDropdownItemColor={chainDropdownItemColor}
+      chainDropdownItemHighlightColor={chainDropdownItemHighlightColor}
+      chainIconSize={walletChainIconSize}
+      chainIconBorderPosition={walletChainIconBorderPosition}
+      chainIconBorderColor={walletChainIconBorderColor}
+      chainIconBorderWidth={walletChainIconBorderWidth}
+      chainIconPlaceholderColor={walletChainIconPlaceholderColor}
+      chainIconPlaceholderFontColor={walletChainIconPlaceholderFontColor}
+      chainIconPlaceholderFontSize={walletChainIconPlaceholderFontSize}
+      chainIconSpinEnabled={walletChainIconSpinEnabled}
+      resolveChainIconSrc={(chainKey) =>
+        resolveChainIconSrcByConfig(chainKey, walletChainIconFileType, walletChainIconFileSize)
+      }
       walletChainOptions={walletChainOptions}
       resolveWalletTitle={resolveWalletTitle}
       onToggleChainOpen={(panelId) => {
@@ -1485,6 +1801,24 @@ export default function UserMenu() {
       iconButtons={addPanelIconButtons}
       chainDropdownFontSize={addPanelChainDropdownFontSize}
       chainDropdownWidth={addPanelChainDropdownWidth}
+      chainDropdownFontName={addPanelChainDropdownFontName}
+      chainDropdownFontColor={addPanelChainDropdownFontColor}
+      chainDropdownAllCaps={addPanelChainDropdownAllCaps}
+      chainDropdownLetterSpacing={addPanelChainDropdownLetterSpacing}
+      chainDropdownItemColor={addPanelChainDropdownItemColor}
+      chainDropdownItemHighlightColor={addPanelChainDropdownItemHighlightColor}
+      chainDropdownItemHeight={addPanelChainDropdownItemHeight}
+      chainIconSize={addPanelChainIconSize}
+      chainIconBorderPosition={addPanelChainIconBorderPosition}
+      chainIconBorderColor={addPanelChainIconBorderColor}
+      chainIconBorderWidth={addPanelChainIconBorderWidth}
+      chainIconPlaceholderColor={addPanelChainIconPlaceholderColor}
+      chainIconPlaceholderFontColor={addPanelChainIconPlaceholderFontColor}
+      chainIconPlaceholderFontSize={addPanelChainIconPlaceholderFontSize}
+      chainIconSpinEnabled={addPanelChainIconSpinEnabled}
+      resolveChainIconSrc={(chainKey) =>
+        resolveChainIconSrcByConfig(chainKey, addPanelChainIconFileType, addPanelChainIconFileSize)
+      }
       titlePaddingBottom={addPanelTitlePaddingBottom}
       isChainOpen={isAddPanelChainOpen}
       isIconHovered={isAddPanelIconHovered}
@@ -1506,6 +1840,8 @@ export default function UserMenu() {
       }}
     />
   );
+
+  if (!authenticated) return null;
 
   return (
     <div className="relative flex items-center gap-3" ref={menuRef}>
@@ -1547,11 +1883,101 @@ export default function UserMenu() {
             ['--highlight-color' as never]: MENU_ICONS.highlight_color,
           }}
         >
-          <Globe2
-            className=""
-            style={{ width: `${MENU_ICONS.size * 4}px`, height: `${MENU_ICONS.size * 4}px` }}
-            color={MENU_ICONS.icon_color}
-          />
+          {activeNetworkMenuChainIconEnabled ? (
+            <div
+              className="relative flex items-center justify-center shrink-0"
+              style={{
+                width: `${activeNetworkMenuChainIconSize}px`,
+                height: `${activeNetworkMenuChainIconSize}px`,
+                borderRadius: '50%',
+                backgroundColor: activeNetworkMenuChainIconPlaceholderColor,
+                ...resolveIconBorderStyle(
+                  activeNetworkMenuChainIconBorderPosition,
+                  activeNetworkMenuChainIconBorderColor,
+                  activeNetworkMenuChainIconBorderWidth
+                ),
+                overflow: 'hidden',
+              }}
+            >
+              {(() => {
+                const iconSrc = resolveActiveNetworkMenuChainIconSrc(selectedChain);
+                if (!iconSrc) {
+                  return (
+                    <span
+                      style={{
+                        position: 'absolute',
+                        inset: 0,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: `${activeNetworkMenuChainIconPlaceholderFontSize}px`,
+                        color: activeNetworkMenuChainIconPlaceholderFontColor,
+                        userSelect: 'none',
+                        pointerEvents: 'none',
+                      }}
+                    >
+                      ?
+                    </span>
+                  );
+                }
+
+                return (
+                  <>
+                    {activeNetworkMenuChainIconSpinEnabled ? (
+                      <SpinningLogo
+                        src={iconSrc}
+                        alt={selectedNetworkLabel}
+                        width={activeNetworkMenuChainIconSize}
+                        height={activeNetworkMenuChainIconSize}
+                        className="absolute inset-0 h-full w-full object-contain"
+                        onError={(e) => {
+                          const img = e.currentTarget as HTMLImageElement;
+                          img.style.display = 'none';
+                          const fallback = img.nextSibling as HTMLElement | null;
+                          if (fallback) fallback.style.display = 'flex';
+                        }}
+                      />
+                    ) : (
+                      <Image
+                        src={iconSrc}
+                        alt={selectedNetworkLabel}
+                        width={activeNetworkMenuChainIconSize}
+                        height={activeNetworkMenuChainIconSize}
+                        className="absolute inset-0 h-full w-full object-contain"
+                        onError={(e) => {
+                          const img = e.currentTarget as HTMLImageElement;
+                          img.style.display = 'none';
+                          const fallback = img.nextSibling as HTMLElement | null;
+                          if (fallback) fallback.style.display = 'flex';
+                        }}
+                      />
+                    )}
+                    <span
+                      style={{
+                        display: 'none',
+                        position: 'absolute',
+                        inset: 0,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: `${activeNetworkMenuChainIconPlaceholderFontSize}px`,
+                        color: activeNetworkMenuChainIconPlaceholderFontColor,
+                        userSelect: 'none',
+                        pointerEvents: 'none',
+                      }}
+                    >
+                      ?
+                    </span>
+                  </>
+                );
+              })()}
+            </div>
+          ) : (
+            <Globe2
+              className=""
+              style={{ width: `${MENU_ICONS.size * 4}px`, height: `${MENU_ICONS.size * 4}px` }}
+              color={MENU_ICONS.icon_color}
+            />
+          )}
           <span
             className="whitespace-nowrap leading-none"
             style={{
@@ -1573,6 +1999,7 @@ export default function UserMenu() {
           >
             {activeNetworkOptions.map(({ label, key }) => {
               const isSelected = key ? selectedChain === key : false;
+              const iconSrc = resolveActiveNetworkChainIconSrc(key);
               const handleClick = () => {
                 setSelectedChain(key);
                 if (typeof window !== 'undefined') {
@@ -1590,16 +2017,114 @@ export default function UserMenu() {
                     fontSize: `${ACTIVE_NETWORK_DROPDOWN.fontSize}px`,
                     fontFamily: ACTIVE_NETWORK_DROPDOWN.fontName,
                     color: ACTIVE_NETWORK_DROPDOWN.fontColor,
-                    backgroundColor: 'transparent',
+                    textTransform: ACTIVE_NETWORK_DROPDOWN.allCaps ? 'uppercase' : 'none',
+                    letterSpacing: ACTIVE_NETWORK_DROPDOWN.letterSpacing,
+                    backgroundColor: isSelected ? activeNetworkSelectedItemColor : 'transparent',
                   }}
                   onMouseEnter={(e) => {
                     e.currentTarget.style.backgroundColor = ACTIVE_NETWORK_DROPDOWN.itemHighlightColor;
                   }}
                   onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = 'transparent';
+                    e.currentTarget.style.backgroundColor = isSelected
+                      ? activeNetworkSelectedItemColor
+                      : 'transparent';
                   }}
                 >
-                  <span className="mr-3 w-4 flex justify-center">{isSelected ? <Check className="w-4 h-4 text-white" /> : null}</span>
+                  <div
+                    className="mr-3 relative flex items-center justify-center shrink-0"
+                    style={{
+                      width: `${activeNetworkChainIconSize}px`,
+                      height: `${activeNetworkChainIconSize}px`,
+                      borderRadius: '50%',
+                      backgroundColor: activeNetworkChainIconPlaceholderColor,
+                      ...resolveIconBorderStyle(
+                        activeNetworkChainIconBorderPosition,
+                        isSelected && activeNetworkChainIconSelectedBorderEnabled
+                          ? activeNetworkChainIconSelectedBorderColor
+                          : activeNetworkChainIconBorderColor,
+                        isSelected && activeNetworkChainIconSelectedBorderEnabled
+                          ? activeNetworkChainIconSelectedBorderWidth
+                          : activeNetworkChainIconBorderWidth
+                      ),
+                      overflow: 'hidden',
+                    }}
+                  >
+                    {iconSrc ? (
+                      <>
+                        {activeNetworkChainIconSpinEnabled ? (
+                          <SpinningLogo
+                            src={iconSrc}
+                            alt={label}
+                            width={activeNetworkChainIconSize}
+                            height={activeNetworkChainIconSize}
+                            className="absolute inset-0 h-full w-full object-contain"
+                            onError={(e) => {
+                              const img = e.currentTarget as HTMLImageElement;
+                              img.style.display = 'none';
+                              const fallback = img.nextSibling as HTMLElement | null;
+                              if (fallback) fallback.style.display = 'flex';
+                            }}
+                          />
+                        ) : (
+                          <Image
+                            src={iconSrc}
+                            alt={label}
+                            width={activeNetworkChainIconSize}
+                            height={activeNetworkChainIconSize}
+                            className="absolute inset-0 h-full w-full object-contain"
+                            onError={(e) => {
+                              const img = e.currentTarget as HTMLImageElement;
+                              img.style.display = 'none';
+                              const fallback = img.nextSibling as HTMLElement | null;
+                              if (fallback) fallback.style.display = 'flex';
+                            }}
+                          />
+                        )}
+                        <span
+                          style={{
+                            display: 'none',
+                            position: 'absolute',
+                            inset: 0,
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: `${activeNetworkChainIconPlaceholderFontSize}px`,
+                            color: activeNetworkChainIconPlaceholderFontColor,
+                            userSelect: 'none',
+                            pointerEvents: 'none',
+                          }}
+                        >
+                          ?
+                        </span>
+                      </>
+                    ) : (
+                      <span
+                        style={{
+                          position: 'absolute',
+                          inset: 0,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: `${activeNetworkChainIconPlaceholderFontSize}px`,
+                          color: activeNetworkChainIconPlaceholderFontColor,
+                          userSelect: 'none',
+                          pointerEvents: 'none',
+                        }}
+                      >
+                        ?
+                      </span>
+                    )}
+                    {isSelected && activeNetworkChainIconSelectedPlaceholder ? (
+                      <span className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                        <Check
+                          style={{
+                            width: `${activeNetworkChainIconPlaceholderFontSize}px`,
+                            height: `${activeNetworkChainIconPlaceholderFontSize}px`,
+                            color: activeNetworkChainIconPlaceholderFontColor,
+                          }}
+                        />
+                      </span>
+                    ) : null}
+                  </div>
                   <span className="flex-1">{label}</span>
                 </button>
               );
@@ -1692,16 +2217,22 @@ export default function UserMenu() {
               </button>
               {isWalletDropdownChainOpen && (
                 <div
-                  className="absolute left-1/2 top-full z-[120] -translate-x-1/2 rounded-xl border border-gray-500 bg-gray-900 shadow-2xl"
+                  className="absolute left-1/2 top-full z-[120] -translate-x-1/2 rounded-xl border border-gray-500 shadow-2xl"
                   style={{
                     fontSize: `${chainDropdownFontSize}px`,
                     fontFamily: titleFontFamily,
                     marginTop: `${titlePaddingBottom}px`,
                     width: `${chainDropdownWidth}px`,
+                    backgroundColor: chainDropdownItemColor,
                   }}
                 >
                   {walletChainOptions.filter((option) => option.key !== walletDropdownChain).map((option) => {
                     const isSelected = walletDropdownChain === option.key;
+                    const chainIconSrc = resolveChainIconSrcByConfig(
+                      option.key,
+                      walletChainIconFileType,
+                      walletChainIconFileSize
+                    );
                     return (
                       <button
                         key={option.key}
@@ -1711,17 +2242,106 @@ export default function UserMenu() {
                           setWalletDropdownHasCustomChain(true);
                           setIsWalletDropdownChainOpen(false);
                         }}
-                        className="flex w-full items-center uppercase tracking-[0.3em] text-gray-300 hover:bg-gray-800 transition-colors"
+                        className="flex w-full items-center uppercase tracking-[0.3em] text-gray-300 transition-colors"
+                        onMouseEnter={(event) => {
+                          event.currentTarget.style.backgroundColor = chainDropdownItemHighlightColor;
+                        }}
+                        onMouseLeave={(event) => {
+                          event.currentTarget.style.backgroundColor = 'transparent';
+                        }}
                         style={{
                           paddingLeft: `${containerPaddingLeft}px`,
                           paddingRight: `${containerPaddingRight}px`,
                           paddingTop: '8px',
                           paddingBottom: '8px',
+                          backgroundColor: 'transparent',
                         }}
                       >
-                        <span className="mr-2 w-4 flex justify-center">
-                          {isSelected ? <Check className="w-4 h-4 text-white" /> : null}
-                        </span>
+                        <div
+                          className="mr-2 relative flex items-center justify-center shrink-0"
+                          style={{
+                            width: `${walletChainIconSize}px`,
+                            height: `${walletChainIconSize}px`,
+                            borderRadius: '50%',
+                            backgroundColor: walletChainIconPlaceholderColor,
+                            ...resolveIconBorderStyle(
+                              walletChainIconBorderPosition,
+                              walletChainIconBorderColor,
+                              walletChainIconBorderWidth
+                            ),
+                            overflow: 'hidden',
+                          }}
+                        >
+                          {chainIconSrc ? (
+                            <>
+                              {walletChainIconSpinEnabled ? (
+                                <SpinningLogo
+                                  src={chainIconSrc}
+                                  alt={option.label}
+                                  width={walletChainIconSize}
+                                  height={walletChainIconSize}
+                                  className="absolute inset-0 h-full w-full object-contain"
+                                  onError={(e) => {
+                                    const img = e.currentTarget as HTMLImageElement;
+                                    img.style.display = 'none';
+                                    const fallback = img.nextSibling as HTMLElement | null;
+                                    if (fallback) fallback.style.display = 'flex';
+                                  }}
+                                />
+                              ) : (
+                                <Image
+                                  src={chainIconSrc}
+                                  alt={option.label}
+                                  width={walletChainIconSize}
+                                  height={walletChainIconSize}
+                                  className="absolute inset-0 h-full w-full object-contain"
+                                  onError={(e) => {
+                                    const img = e.currentTarget as HTMLImageElement;
+                                    img.style.display = 'none';
+                                    const fallback = img.nextSibling as HTMLElement | null;
+                                    if (fallback) fallback.style.display = 'flex';
+                                  }}
+                                />
+                              )}
+                              <span
+                                style={{
+                                  display: 'none',
+                                  position: 'absolute',
+                                  inset: 0,
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  fontSize: `${walletChainIconPlaceholderFontSize}px`,
+                                  color: walletChainIconPlaceholderFontColor,
+                                  userSelect: 'none',
+                                  pointerEvents: 'none',
+                                }}
+                              >
+                                ?
+                              </span>
+                            </>
+                          ) : (
+                            <span
+                              style={{
+                                position: 'absolute',
+                                inset: 0,
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontSize: `${walletChainIconPlaceholderFontSize}px`,
+                                color: walletChainIconPlaceholderFontColor,
+                                userSelect: 'none',
+                                pointerEvents: 'none',
+                              }}
+                            >
+                              ?
+                            </span>
+                          )}
+                          {isSelected ? (
+                            <span className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                              <Check className="w-4 h-4 text-white" />
+                            </span>
+                          ) : null}
+                        </div>
                         <span className="flex-1 text-left">{option.label}</span>
                       </button>
                     );

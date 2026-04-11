@@ -1,3 +1,4 @@
+import { none } from '@solana/kit';
 import { AFFILIATE_LINKS } from './external_links';
 
 export const BALANCE_DECIMALS = 8; // Token balance display precision used in renderBalances in altair_frontend1/src/components/UserMenu.tsx
@@ -15,13 +16,49 @@ export const PANEL_DISPLAY = {
 };
 
 export const ACTIVE_NETWORK_DROPDOWN = {
-  width: 240, // w-48 = 48 * 4 = 192px (Tailwind w-48 = 12rem = 192px)
+  width: 360, // w-48 = 48 * 4 = 192px (Tailwind w-48 = 12rem = 192px)
   fontSize: 14, // text-sm = 14px
-  fontName: 'sans-serif', // default font
+  fontName: 'monospace', // default font
   fontColor: '#d1d5db', // text-gray-300
   itemColor: '#101828', // bg-gray-900
   itemHighlightColor: '#1f2937', // hover:bg-gray-800
-  itemHeight: 48, // py-3 = 12px top + bottom, estimated total height
+  itemHeight: 36, // py-3 = 12px top + bottom, estimated total height
+  selectedItemColor: '#1f2937',
+  allCaps: true,
+  letterSpacing: '0.3em',
+  MENU_ICONS_override: {
+    buttonText: {
+      
+    },
+    chainIcon: {
+      fileType: 'webp',
+      fileSize: '64px',
+      size: 25,
+      borderPosition: 'outer',
+      borderColor: null,
+      borderWidth: null,
+      placeholderColor: '#1F2937',
+      placeholderFontColor: '#d1d5db',
+      placeholderFontSize: 14,
+      spin: true,
+    },
+  },
+  chainIcons: {
+    fileType: 'webp',
+    fileSize: '64px',
+    size: 23,
+    borderPosition: 'outer',
+    borderColor: null,
+    borderWidth: null,
+    selectedBorder: true,
+    selectedBorderColor: '#d1d5db',
+    selectedBorderWidth: 3,
+    selectedPlaceholder: false,
+    placeholderColor: '#1F2937',
+    placeholderFontColor: '#09ff00',
+    placeholderFontSize: 116,
+    spin: true,
+  },
 }
 
 export const WALLET_DISPLAY = { // Wallet panel/dropdown sizing and typography config consumed in altair_frontend1/src/components/UserMenu.tsx
@@ -55,11 +92,47 @@ export const WALLET_DISPLAY = { // Wallet panel/dropdown sizing and typography c
     color: '#f3f4f6', // Token balance color in UserMenu.tsx
     decimals: 8, // Token balance decimal precision in UserMenu.tsx
   },
+  tokenIcons: { // Token icon config used in renderBalances in UserMenu.tsx
+    fileType: 'webp', // Image file extension in UserMenu.tsx
+    fileSize: '64px', // Subfolder name under public/image/tokens/<fileType>/ in UserMenu.tsx
+    size: 25, // Rendered icon size in pixels in UserMenu.tsx
+    borderPosition: 'inner',
+    borderColor: null,
+    borderWidth: null,
+    placeholderColor: '#1F2937',
+    placeholderFontColor: '#d1d5db',
+    placeholderFontSize: 14,
+    spin: true,
+  },
+  chainIcons: {
+    fileType: 'webp',
+    fileSize: '64px',
+    size: 20,
+    borderPosition: 'outer',
+    borderColor: null,
+    borderWidth: null,
+    placeholderColor: '#1F2937',
+    placeholderFontColor: '#d1d5db',
+    placeholderFontSize: 14,
+    spin: true,
+  },
   title: { // Wallet panel title padding and font in UserMenu.tsx
     paddingTop: 2, // Title top padding in UserMenu.tsx
     paddingBottom: 2, // Title bottom padding in UserMenu.tsx
     fontSize: 11, // Title font size in UserMenu.tsx
     fontName: 'monospace', // Title font family in UserMenu.tsx
+    chainIcon: {
+      fileType: 'webp',
+      fileSize: '64px',
+      size: 15,
+      borderPosition: 'outer',
+      borderColor: null,
+      borderWidth: null,
+      placeholderColor: '#1F2937',
+      placeholderFontColor: '#d1d5db',
+      placeholderFontSize: 14,
+      spin: true,
+    },
   },
   x: { // Wallet panel close “×” placement and sizing in UserMenu.tsx
     paddingTop: 0, // Close top offset in UserMenu.tsx
@@ -79,8 +152,15 @@ export const WALLET_DISPLAY = { // Wallet panel/dropdown sizing and typography c
     }
   },
   chainDropdown: { // Wallet chain dropdown sizing in UserMenu.tsx
-    width: 212, // Dropdown width in UserMenu.tsx
+    width: 220, // Dropdown width in UserMenu.tsx
     fontSize: 12, // Dropdown font size in UserMenu.tsx
+    fontName: 'monospace',
+    fontColor: '#d1d5db',
+    allCaps: true,
+    letterSpacing: '0.3em',
+    itemColor: '#111827',
+    itemHighlightColor: '#1f2937',
+    itemHeight: 32,
   },
   tokenDropdown: { 
     width: 124,
@@ -278,9 +358,28 @@ export const ADD_PANEL_DISPLAY = { // ADD_PANEL sizing, label, and icon styles i
     size: 23, // Close icon size in UserMenu.tsx
     fontName: 'sans-serif', // Close font family in UserMenu.tsx
   },
-  chainDropdown: { // ADD_PANEL chain dropdown sizing in UserMenu.tsx
-    width: 212, // Dropdown width in UserMenu.tsx
-    fontSize: 10, // Dropdown font size in UserMenu.tsx
+  chainDropdown: { // Wallet chain dropdown sizing in UserMenu.tsx
+    width: 220, // Dropdown width in UserMenu.tsx
+    fontSize: 12, // Dropdown font size in UserMenu.tsx
+    fontName: 'monospace',
+    fontColor: '#d1d5db',
+    allCaps: true,
+    letterSpacing: '0.3em',
+    itemColor: '#111827',
+    itemHighlightColor: '#1f2937',
+    itemHeight: 32,
+  },
+  chainIcons: {
+    fileType: 'webp',
+    fileSize: '64px',
+    size: 20,
+    borderPosition: 'outer',
+    borderColor: null,
+    borderWidth: null,
+    placeholderColor: '#1F2937',
+    placeholderFontColor: '#d1d5db',
+    placeholderFontSize: 14,
+    spin: true,
   },
 };
 
