@@ -1,49 +1,55 @@
 
 ## Panel Behavior
 
-Panels are persistent UI blocks that appear below the top-right action row and remain visible until explicitly dismissed by a close affordance. Unlike dropdowns, panels do **not** dismiss on outside clicks or unrelated UI interactions.
+Panels are persistent UI blocks shown under the top-right action row. They remain visible until closed explicitly and are not dismissed by unrelated interactions.
 
-Panel rendering in the frontend is controlled by [`altair_frontend1/config/ui_config.ts`](../../altair_frontend1/config/ui_config.ts:1). The [`WALLET_DISPLAY`](../../altair_frontend1/config/ui_config.ts:6) setting defines the allowed display options (`panel`, `drop_down`) and selects which mode is active via `active`. When `active` is `panel`, the UI renders the persistent panel variant; when `active` is `drop_down`, the UI renders the transient dropdown variant instead.
+Panel rendering is controlled by [`WALLET_DISPLAY.active`](../../config/ui_config.ts:67) in [`ui_config.ts`](../../config/ui_config.ts:1):
+- `panel` -> persistent wallet panels
+- `drop_down` -> transient wallet dropdown
 
 ### Wallet panels (WALLET_PANEL)
 
-The current implementation applies panel behavior to the wallet display in [`altair_frontend1/src/components/UserMenu.tsx`](../../altair_frontend1/src/components/UserMenu.tsx:14). When the active mode is `panel`, clicking the wallet control shows a **stack** of wallet panels. Each WALLET_PANEL is an independent instance with its own chain selection dropdown state and close “×”.
+In panel mode, [`UserMenu.tsx`](../../src/components/UserMenu.tsx:1) renders a stack of wallet panels. Each WALLET_PANEL is independent with its own chain dropdown state and close button.
 
 The wallet panel stack is stored in state as a list of panel objects (`walletPanels`) and rendered in order. Each panel object includes:
 - `id` (stable key)
 - `chainKey` (which chain’s balances are shown)
 - `isChainOpen` (whether that panel’s chain dropdown is open)
 
-Each WALLET_PANEL uses [`WALLET_DISPLAY`](../../altair_frontend1/config/ui_config.ts:6) for sizing, padding, fonts, and dropdown sizing. Token row styling comes from `WALLET_DISPLAY.rows`, `WALLET_DISPLAY.tokenSymbols`, and `WALLET_DISPLAY.tokenBalances`.
+Each WALLET_PANEL uses [`WALLET_DISPLAY`](../../config/ui_config.ts:64) for sizing, spacing, fonts, and row/dropdown behavior.
 
-### Token icon behavior in WALLET_PANEL rows
+### Token icon behavior in wallet panel rows
 
-Token rows in WALLET_PANEL now include icon rendering logic from [`renderBalances`](../../altair_frontend1/src/components/UserMenu.tsx:1122), which is shared by both panel and dropdown wallet UIs.
+Token rows are rendered by shared [`renderBalances()`](../../src/components/UserMenu.tsx:1346) (used by panel + dropdown modes).
 
-Config source: `WALLET_DISPLAY.tokenIcons` in [`ui_config.ts`](../../altair_frontend1/config/ui_config.ts:58)
+Config source: [`WALLET_DISPLAY.tokenIcons`](../../config/ui_config.ts:95)
 
-- `fileType` + `fileSize` build the icon path in [`resolveTokenIconSrc`](../../altair_frontend1/src/components/UserMenu.tsx:1119).
-- `size` controls rendered icon diameter.
-- `placeholderColor` controls the immediate placeholder circle.
-- `placeholderFontColor` controls the fallback question-mark color.
+Supported behavior:
+- dynamic pathing (`fileType`, `fileSize`) via [`resolveTokenIconSrc()`](../../src/components/UserMenu.tsx:1317)
+- placeholder + fallback `?`
+- spin toggle via [`SpinningLogo`](../../src/components/SpinningLogo.tsx:11)
+- configurable border model via `borderPosition` + `borderColor` + `borderWidth`/`borderSize`
 
-Runtime flow:
+Rendering now uses Next [`Image`](../../src/components/UserMenu.tsx:1380) for non-spinning branches.
 
-1. A circular placeholder is rendered immediately (no network dependency).
-2. If `iconSrc` is truthy, the icon file is attempted.
-3. If image loading fails (`onError`) **or** if `iconSrc` is falsy, a centered `?` fallback is shown.
+### Chain icons in panel-related dropdowns
 
-Icon files are served from `public/image/tokens/<fileType>/<fileSize>/<SYMBOL>.<fileType>`.
+Wallet panel + add-panel chain options use icon resolution from chain symbol metadata and config surfaces:
+- [`WALLET_DISPLAY.chainIcons`](../../config/ui_config.ts:107)
+- [`WALLET_DISPLAY.title.chainIcon`](../../config/ui_config.ts:124)
+- [`ADD_PANEL_DISPLAY.chainIcons`](../../config/ui_config.ts:354)
 
-Chain labels and dropdown options are config-driven:
-- `WALLET_CHAIN_LABELS` controls panel titles (including testnet naming rules).
-- `WALLET_CHAIN_OPTIONS` drives dropdown option lists.
+`ALL_CHAINS` uses the globe asset [`/globe.svg`](../../public/globe.svg:1) in wallet/add-panel dropdowns via shared resolver logic in [`UserMenu.tsx`](../../src/components/UserMenu.tsx:334).
+
+Notes:
+- Globe color is currently defined by the SVG `fill` value in [`public/globe.svg`](../../public/globe.svg:1).
+- Chain icon containers support `inner` and `outer` border modes.
 ### ADD_PANEL (panel adder)
 
-The ADD_PANEL is the compact panel used to add new WALLET_PANEL instances. It is rendered beneath the wallet panel stack and persists across outside clicks. The ADD_PANEL includes:
+ADD_PANEL is the compact control for adding new WALLET_PANEL instances. It is rendered beneath the wallet stack and includes:
 - A left-aligned “Add Panel:” label (styled by `ADD_PANEL_DISPLAY.label`).
 - A wallet icon button with a ring (colors + sizing from `ADD_PANEL_DISPLAY.iconButtons`).
-- A chain dropdown that **excludes** chains already represented by open WALLET_PANEL instances.
+- A chain dropdown that excludes chains already represented by open WALLET_PANEL instances.
 
 Selecting a chain from the ADD_PANEL dropdown creates a new WALLET_PANEL instance using that chain. The new panel appears between the existing panels and the ADD_PANEL, pushing the ADD_PANEL downward.
 
@@ -53,21 +59,19 @@ Close behavior:
 
 ### Panel state persistence across open/close cycles
 
-When the wallet button is clicked to dismiss the panel stack (toggling `isWalletPanelOpen` off), the code in [`altair_frontend1/src/components/UserMenu.tsx`](../../altair_frontend1/src/components/UserMenu.tsx) only clears the `walletPanels` array if there is exactly **one** panel open at the time of dismissal. If two or more panels are open, the array is left intact.
-
-On the next wallet button click, `initWalletPanels` (in [`altair_frontend1/src/lib/usePanels.ts`](../../altair_frontend1/src/lib/usePanels.ts)) detects `existing.length > 0` and skips re-initialization, so the previous panel configuration (all open chains) is restored. This is intentional: panels remember their state across open/close cycles when more than one panel was open.
+When wallet panel mode is toggled closed, panel list state is only fully reset in specific conditions; otherwise, panel configuration is preserved and restored on reopen via [`usePanels.ts`](../../src/lib/usePanels.ts:1).
 
 ---
 
 ## Balance update behavior in wallet panels
 
-Wallet panels and the wallet dropdown render from the same balance state (`balancesByChain`) in [`UserMenu.tsx`](../../altair_frontend1/src/components/UserMenu.tsx:37).
+Wallet panels and wallet dropdown mode share `balancesByChain` in [`UserMenu.tsx`](../../src/components/UserMenu.tsx:69).
 
 ### Rendering path
 
-- `renderBalances` drives token rows.
-- `resolveBalanceForSymbol` reads current per-chain token balances.
-- `WalletPanel` receives `renderBalances` as a prop.
+- [`renderBalances()`](../../src/components/UserMenu.tsx:1346) drives token rows.
+- [`resolveBalanceForSymbol()`](../../src/components/UserMenu.tsx:1036) reads per-chain balances.
+- [`WalletPanel`](../../src/components/panels/WalletPanel.tsx:1) receives `renderBalances` as prop.
 
 This means panel-mode and dropdown-mode are consistent by design.
 
@@ -79,7 +83,7 @@ When frontend receives `altair:swap-complete`:
 2. Affected chain caches are marked stale.
 3. All affected chains are force-refreshed from `/api/balances`.
 
-Reference: [`handleSwapComplete()`](../../altair_frontend1/src/components/UserMenu.tsx:723).
+Reference: [`handleSwapComplete()`](../../src/components/UserMenu.tsx:919).
 
 ### Why this matters for panel mode
 
@@ -93,4 +97,4 @@ Historically, selected-chain gating could delay destination-chain persistence/re
 - Durable Mongo persistence is handled by backend write paths (`/api/balances` reconciliation + relay writeback persistence).
 - Panel rendering is intentionally non-blocking: UI responsiveness first, authoritative convergence shortly after.
 
-For full backend persistence details, see [`Balances.md`](./Balances.md) and [`MongoDB.md`](./MongoDB.md).
+For backend persistence details, see corresponding balance and Mongo notes in this docs set.
