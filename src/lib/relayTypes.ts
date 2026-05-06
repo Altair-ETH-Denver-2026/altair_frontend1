@@ -64,4 +64,10 @@ export type RelayQuoteResponse = {
   details?: Record<string, unknown>;
   fees?: Record<string, unknown>;
   protocol?: Record<string, unknown>;
+  _altairFee?: {
+    token: string;
+    amount: string | null;
+    decimals: number | null;
+    bps: number;
+  } | null;
 };

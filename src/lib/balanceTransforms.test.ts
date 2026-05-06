@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { normalizeBalancesResponse, resolveTokenRowsForChain } from './balanceTransforms';
-import type { ApiChainBalances } from '../../config/balance_types';
+import type { ApiChainBalances } from './balanceTypes';
 import type { ChainKey } from '../../config/blockchain_config';
 
 test('normalizeBalancesResponse keeps new tokens payload shape intact', () => {

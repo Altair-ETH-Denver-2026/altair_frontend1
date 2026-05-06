@@ -4,13 +4,6 @@ import { useEffect, useMemo, useRef } from 'react';
 import { usePrivy } from '@privy-io/react-auth';
 import { useWallets } from '@privy-io/react-auth';
 import { useWallets as useSolanaWallets } from '@privy-io/react-auth/solana';
-import { withWaitLogger } from './waitLogger';
-import { getCachedPrivyAccessToken } from './privyTokenCache';
-
-type ContactInfo = {
-  email?: string;
-  phone?: string;
-};
 
 type ContactSnapshot = {
   id?: string;
@@ -59,7 +52,7 @@ const buildContactSnapshot = (user: PrivyUserShape | null | undefined): ContactS
 };
 
 export function useUserSync() {
-  const { authenticated, getAccessToken, user } = usePrivy();
+  const { authenticated, user } = usePrivy();
   const { wallets } = useWallets();
   const { wallets: solanaWallets } = useSolanaWallets();
   const lastSyncedKeyRef = useRef<string | null>(null);
@@ -90,48 +83,8 @@ export function useUserSync() {
 
     if (lastSyncedKeyRef.current === syncKey) return;
 
-    const run = async () => {
-      try {
-        const accessToken = await withWaitLogger(
-          {
-            file: 'altair_frontend1/src/lib/useUserSync.ts',
-            target: 'Privy getAccessToken',
-            description: 'access token for login sync',
-          },
-          () => getCachedPrivyAccessToken(getAccessToken)
-        );
-        const contactInfo: ContactInfo = {
-          ...(contactSnapshot.email ? { email: contactSnapshot.email } : {}),
-          ...(contactSnapshot.phone ? { phone: contactSnapshot.phone } : {}),
-        };
-        const walletPayload = {
-          ...(evmWalletAddress ? { evmAddress: evmWalletAddress } : {}),
-          ...(solanaWalletAddress ? { solanaAddress: solanaWalletAddress } : {}),
-        };
-        await withWaitLogger(
-          {
-            file: 'altair_frontend1/src/lib/useUserSync.ts',
-            target: '/api/balances',
-            description: 'user login + balance sync response',
-          },
-          () =>
-            fetch('/api/balances', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                accessToken,
-                ...(contactInfo.email ? { email: contactInfo.email } : {}),
-                ...(contactInfo.phone ? { phone: contactInfo.phone } : {}),
-                ...walletPayload,
-              }),
-            })
-        );
-        lastSyncedKeyRef.current = syncKey;
-      } catch (err) {
-        console.warn('User login sync failed:', err);
-      }
-    };
-
-    void run();
-  }, [authenticated, getAccessToken, contactSnapshot, evmWalletAddress, solanaWalletAddress]);
+    // User sync is now centralized in wallet preload flow to avoid duplicate
+    // refresh-time /api/balances calls from multiple frontend entry points.
+    lastSyncedKeyRef.current = syncKey;
+  }, [authenticated, contactSnapshot, evmWalletAddress, solanaWalletAddress]);
 }

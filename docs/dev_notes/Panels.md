@@ -20,26 +20,26 @@ Each WALLET_PANEL uses [`WALLET_DISPLAY`](../../config/ui_config.ts:64) for sizi
 
 ### Token icon behavior in wallet panel rows
 
-Token rows are rendered by shared [`renderBalances()`](../../src/components/UserMenu.tsx:1346) (used by panel + dropdown modes).
+Token rows are rendered by shared [`renderBalances()`](../../src/components/UserMenu.tsx:1658) (used by panel + dropdown modes).
 
 Config source: [`WALLET_DISPLAY.tokenIcons`](../../config/ui_config.ts:95)
 
 Supported behavior:
-- dynamic pathing (`fileType`, `fileSize`) via [`resolveTokenIconSrc()`](../../src/components/UserMenu.tsx:1317)
+- dynamic pathing (`fileType`, `fileSize`) via [`resolveTokenIconSrc()`](../../src/components/UserMenu.tsx:1604)
 - placeholder + fallback `?`
-- spin toggle via [`SpinningLogo`](../../src/components/SpinningLogo.tsx:11)
+- spin toggle via [`SpinningLogo`](../../src/components/SpinningLogo.tsx)
 - configurable border model via `borderPosition` + `borderColor` + `borderWidth`/`borderSize`
 
-Rendering now uses Next [`Image`](../../src/components/UserMenu.tsx:1380) for non-spinning branches.
+Rendering uses Next [`Image`](../../src/components/UserMenu.tsx:1692) for non-spinning branches and `SpinningLogo` for spin-enabled branches (`UserMenu.tsx:1678`).
 
 ### Chain icons in panel-related dropdowns
 
-Wallet panel + add-panel chain options use icon resolution from chain symbol metadata and config surfaces:
+Wallet panel + add-panel chain options use convention-based icon resolution from chain symbol + config surfaces:
 - [`WALLET_DISPLAY.chainIcons`](../../config/ui_config.ts:107)
 - [`WALLET_DISPLAY.title.chainIcon`](../../config/ui_config.ts:124)
-- [`ADD_PANEL_DISPLAY.chainIcons`](../../config/ui_config.ts:354)
+- [`ADD_PANEL_DISPLAY.chainIcons`](../../config/ui_config.ts:372)
 
-`ALL_CHAINS` uses the globe asset [`/globe.svg`](../../public/globe.svg:1) in wallet/add-panel dropdowns via shared resolver logic in [`UserMenu.tsx`](../../src/components/UserMenu.tsx:334).
+`ALL_CHAINS` uses the globe asset [`/globe.svg`](../../public/globe.svg) in wallet/add-panel dropdowns via shared resolver logic in [`resolveChainIconSrcByConfig()`](../../src/components/UserMenu.tsx:335).
 
 Notes:
 - Globe color is currently defined by the SVG `fill` value in [`public/globe.svg`](../../public/globe.svg:1).
@@ -59,19 +59,19 @@ Close behavior:
 
 ### Panel state persistence across open/close cycles
 
-When wallet panel mode is toggled closed, panel list state is only fully reset in specific conditions; otherwise, panel configuration is preserved and restored on reopen via [`usePanels.ts`](../../src/lib/usePanels.ts:1).
+When wallet panel mode is toggled closed, panel list state is only fully reset when **exactly one** panel was open at the time of dismissal — see [`UserMenu.tsx:2447`](../../src/components/UserMenu.tsx): `setWalletPanels((existing) => (existing.length === 1 ? [] : existing));`. If two or more panels were open, the array is preserved and `initWalletPanels` ([`usePanels.ts:46`](../../src/lib/usePanels.ts)) skips re-initialization on the next open by checking `existing.length > 0`.
 
 ---
 
 ## Balance update behavior in wallet panels
 
-Wallet panels and wallet dropdown mode share `balancesByChain` in [`UserMenu.tsx`](../../src/components/UserMenu.tsx:69).
+Wallet panels and wallet dropdown mode share `balancesByChain` in [`UserMenu.tsx`](../../src/components/UserMenu.tsx:70).
 
 ### Rendering path
 
-- [`renderBalances()`](../../src/components/UserMenu.tsx:1346) drives token rows.
-- [`resolveBalanceForSymbol()`](../../src/components/UserMenu.tsx:1036) reads per-chain balances.
-- [`WalletPanel`](../../src/components/panels/WalletPanel.tsx:1) receives `renderBalances` as prop.
+- [`renderBalances()`](../../src/components/UserMenu.tsx:1658) drives token rows.
+- [`resolveBalanceForSymbol()`](../../src/components/UserMenu.tsx:1323) reads per-chain balances.
+- [`WalletPanel`](../../src/components/panels/WalletPanel.tsx) receives `renderBalances` as a prop.
 
 This means panel-mode and dropdown-mode are consistent by design.
 
@@ -83,7 +83,7 @@ When frontend receives `altair:swap-complete`:
 2. Affected chain caches are marked stale.
 3. All affected chains are force-refreshed from `/api/balances`.
 
-Reference: [`handleSwapComplete()`](../../src/components/UserMenu.tsx:919).
+Reference: [`handleSwapComplete()`](../../src/components/UserMenu.tsx:1131).
 
 ### Why this matters for panel mode
 

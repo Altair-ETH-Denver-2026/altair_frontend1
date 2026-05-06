@@ -17,15 +17,16 @@ import WalletPanel from './panels/WalletPanel';
 import AddPanel from './panels/AddPanel';
 import { SpinningLogo } from './SpinningLogo';
 import { useEffect as useClientEffect } from 'react';
-import { BLOCKCHAIN, CHAINS, GAS_RESERVES, GAS_TOKENS, FORCE_QUERY_CHAINS, type ChainKey } from '../../config/blockchain_config';
+import { BLOCKCHAIN, CHAINS, GAS_RESERVES, GAS_TOKENS, FORCE_QUERY_CHAINS, BALANCE_RULES, type ChainKey } from '../../config/blockchain_config';
 import { BASE_MAINNET, BASE_SEPOLIA, ETH_MAINNET, ETH_SEPOLIA, SOLANA_MAINNET, SOLANA_DEVNET, resolveRpcUrls } from '../../config/chain_info';
 import * as BaseTokens from '../../config/token_info/base_tokens';
 import * as BaseSepoliaTokens from '../../config/token_info/base_testnet_sepolia_tokens';
 import * as EthTokens from '../../config/token_info/eth_tokens';
 import * as EthSepoliaTokens from '../../config/token_info/eth_sepolia_testnet_tokens';
 import * as SolanaTokens from '../../config/token_info/solana_tokens';
-import type { ApiChainBalances, ApiTokenBalance } from '../../config/balance_types';
+import type { ApiChainBalances, ApiTokenBalance } from '../lib/balanceTypes';
 import { normalizeBalancesResponse, resolveTokenRowsForChain } from '../lib/balanceTransforms';
+import { dispatchBalanceUpdated, dispatchBalanceStale } from '../lib/eventTypes';
 import { ACTIVE_NETWORK_DROPDOWN, ADD_PANEL_DISPLAY, BALANCE_DECIMALS, CHAIN_OPTIONS, MENU_ICONS, WALLET_DISPLAY } from '../../config/ui_config';
 
 type UiChainKey = ChainKey | 'ALL';
@@ -41,7 +42,6 @@ export default function UserMenu() {
   const { wallets } = useWallets();
   const { wallets: solanaWallets } = useSolanaWallets();
   const { signAndSendTransaction } = useSignAndSendTransaction();
-  const cachedEvmKey = 'cached:evmAddress';
   const cachedSolKey = 'cached:solAddress';
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isWalletOpen, setIsWalletOpen] = useState(false);
@@ -82,7 +82,7 @@ export default function UserMenu() {
   const [tokenDropdownForceAll, setTokenDropdownForceAll] = useState<Record<number, boolean>>({});
   const [walletAddressCopyState, setWalletAddressCopyState] = useState<Record<string, boolean>>({});
   const walletAddressCopyTimers = useRef<Record<string, ReturnType<typeof setTimeout> | null>>({});
-  const balanceOverrideRef = useRef<Record<string, { value: string; expiresAt: number }>>({});
+  const balanceOverrideRef = useRef<Record<string, { value: string; raw?: string; expiresAt: number }>>({});
   const executeSwap = useSwap(selectedChain);
   const executeSolanaSwap = useSolanaSwap(selectedChain);
   const executeSolanaTransfer = useSolanaTransfer(selectedChain);
@@ -505,6 +505,7 @@ export default function UserMenu() {
   };
   const balanceCacheTtlMs = 30_000;
   const inFlightBalanceKey = useRef<string | null>(null);
+  const loginPreloadKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (Object.keys(withdrawReceipt).length === 0) return;
@@ -538,10 +539,42 @@ export default function UserMenu() {
   ) => {
     setBalancesByChain((prev) => {
       const existing = prev[chainKey] ?? { tokens: {} };
-      const nextTokens: Record<string, ApiTokenBalance> = {
-        ...(existing.tokens ?? {}),
-        ...(snapshot.tokens ?? {}),
-      };
+      const existingTokens = existing.tokens ?? {};
+      const snapshotTokens = snapshot.tokens ?? {};
+      
+      // Merge tokens intelligently, preserving staleness fields from existing unless overridden
+      const nextTokens: Record<string, ApiTokenBalance> = {};
+      
+      // First, copy all existing tokens
+      Object.entries(existingTokens).forEach(([symbol, existingToken]) => {
+        nextTokens[symbol] = { ...existingToken };
+      });
+      
+      // Then apply snapshot updates, merging staleness fields appropriately
+      Object.entries(snapshotTokens).forEach(([symbol, snapshotToken]) => {
+        const existingToken = existingTokens[symbol];
+        if (existingToken) {
+          // Merge: keep existing staleness fields unless snapshot provides new ones
+          nextTokens[symbol] = {
+            ...existingToken,
+            ...snapshotToken,
+            // If snapshot provides balance, we should clear staleness (balance is fresh)
+            ...(snapshotToken.balance !== undefined ? {
+              isStale: false,
+              staleReason: undefined,
+              staleSince: undefined,
+            } : {
+              // Otherwise preserve existing staleness fields
+              isStale: existingToken.isStale,
+              staleReason: existingToken.staleReason,
+              staleSince: existingToken.staleSince,
+            }),
+          };
+        } else {
+          // New token from snapshot
+          nextTokens[symbol] = snapshotToken;
+        }
+      });
 
       const now = Date.now();
       Object.entries(nextTokens).forEach(([symbol, token]) => {
@@ -555,6 +588,9 @@ export default function UserMenu() {
         nextTokens[symbol] = {
           ...token,
           balance: override.value,
+          ...(typeof override.raw === 'string' && override.raw.trim().length > 0
+            ? { balanceRaw: override.raw.trim() }
+            : {}),
         };
       });
 
@@ -572,6 +608,22 @@ export default function UserMenu() {
         if (merged.solanaAddress !== undefined) setSolanaAddress(merged.solanaAddress);
       }
 
+      // Dispatch balance-updated events for tokens that changed
+      Object.entries(nextTokens).forEach(([symbol, token]) => {
+        const existingToken = existingTokens[symbol];
+        if (!existingToken || existingToken.balance !== token.balance) {
+          // Balance changed or new token
+          dispatchBalanceUpdated({
+            chainKey,
+            symbol,
+            balance: token.balance,
+            decimals: token.decimals,
+            source: 'cache', // or 'mongo'? We don't know source here, use 'cache' as default
+            timestamp: Date.now(),
+          });
+        }
+      });
+
       return {
         ...prev,
         [chainKey]: merged,
@@ -579,10 +631,15 @@ export default function UserMenu() {
     });
   };
 
-  const loadCachedBalances = (cacheKey: string, chainKey: ChainKey, solanaAddressValue?: string | null) => {
-    if (typeof window === 'undefined') return false;
+  const loadCachedBalances = (
+    cacheKey: string,
+    chainKey: ChainKey,
+    solanaAddressValue?: string | null,
+    context?: 'login' | 'refresh' | 'openWallet' | 'changeChain' | 'swapComplete' | 'swapStart'
+  ): { hit: boolean; stale: boolean } => {
+    if (typeof window === 'undefined') return { hit: false, stale: false };
     const raw = localStorage.getItem(cacheKey);
-    if (!raw) return false;
+    if (!raw) return { hit: false, stale: false };
     try {
       const cached = JSON.parse(raw) as {
         timestamp: number;
@@ -593,13 +650,26 @@ export default function UserMenu() {
         address?: string;
         solanaAddress?: string;
       };
-      if (!cached?.timestamp || !cached.tokens) return false;
+      if (!cached?.timestamp || !cached.tokens) return { hit: false, stale: false };
+
+      const isSourceStale = cached.source === 'stale';
       
-      // Check if cache is marked as stale (e.g., from swap completion)
-      const isStale = cached.source === 'stale';
-      if (isStale) return false;
-      
-      // No TTL check - cache persists indefinitely
+      // Check time-based staleness only if context matches staleTimerCheckConditions
+      const staleTimer = BALANCE_RULES.staleness.staleTimer;
+      let isTimeStale = false;
+      if (staleTimer > 0 && context) {
+        const staleTimerConditions = BALANCE_RULES.staleness.staleTimerCheckConditions;
+        // Check if this context should trigger time-based staleness checking
+        // Use type assertion to safely check property existence
+        if (context in staleTimerConditions && staleTimerConditions[context as keyof typeof staleTimerConditions]) {
+          const now = Date.now();
+          const cacheAge = now - cached.timestamp;
+          isTimeStale = cacheAge > staleTimer;
+        }
+      }
+
+      const isStale = isSourceStale || isTimeStale;
+
       applyBalanceSnapshot(
         chainKey,
         {
@@ -612,9 +682,9 @@ export default function UserMenu() {
         },
         solanaAddressValue
       );
-      return true;
+      return { hit: true, stale: isStale };
     } catch {
-      return false;
+      return { hit: false, stale: false };
     }
   };
 
@@ -670,9 +740,34 @@ export default function UserMenu() {
 
   const fetchBalancesForChain = async (
     chainKey: ChainKey,
-    { forceRefresh, skipNetworkIfCached = false }: { forceRefresh: boolean; skipNetworkIfCached?: boolean }
+    {
+      forceRefresh,
+      skipNetworkIfCached = false,
+      skipAsyncVerification = false,
+      includeAllChains = false,
+      refreshSelectedChain = false,
+    }: {
+      forceRefresh: boolean;
+      skipNetworkIfCached?: boolean;
+      skipAsyncVerification?: boolean;
+      includeAllChains?: boolean;
+      refreshSelectedChain?: boolean;
+    },
+    context?: 'login' | 'refresh' | 'openWallet' | 'changeChain' | 'swapComplete' | 'swapStart'
   ) => {
     if (!authenticated) return;
+
+    // Apply FORCE_QUERY_CHAINS configuration: force blockchain query for specific contexts
+    let effectiveForceRefresh = forceRefresh;
+    let effectiveSkipAsyncVerification = skipAsyncVerification;
+    
+    if (context && FORCE_QUERY_CHAINS.balances[context]) {
+      // Force blockchain query for this context
+      effectiveForceRefresh = true;
+      // Don't skip async verification when forcing blockchain query
+      effectiveSkipAsyncVerification = false;
+      console.log(`[balances] FORCE_QUERY_CHAINS: context="${context}" forcing blockchain query`);
+    }
 
     let token: string | null = null;
     try {
@@ -680,7 +775,8 @@ export default function UserMenu() {
     } catch {
       token = null;
     }
-    const cachedAddress = typeof window !== 'undefined' ? localStorage.getItem(cachedEvmKey) : null;
+    // Use the live Privy wallet address (always lowercase) as the EVM address for cache keying.
+    const evmWalletAddress = wallets[0]?.address?.toLowerCase() ?? null;
     const cachedSolana = typeof window !== 'undefined' ? localStorage.getItem(cachedSolKey) : null;
     const solanaAddressValue = chainKey === 'SOLANA_MAINNET' || chainKey === 'SOLANA_DEVNET'
       ? solanaWallets[0]?.address ?? cachedSolana ?? null
@@ -688,17 +784,17 @@ export default function UserMenu() {
 
     if (chainKey === 'SOLANA_MAINNET' || chainKey === 'SOLANA_DEVNET') {
       if (!solanaAddressValue) return;
-    } else if (!token && !cachedAddress) {
+    } else if (!token && !evmWalletAddress) {
       return;
     }
 
-    const cacheKey = `cached:balances:${chainKey}:${chainKey === 'SOLANA_MAINNET' || chainKey === 'SOLANA_DEVNET' ? solanaAddressValue : cachedAddress ?? 'unknown'}`;
+    const cacheKey = `cached:balances:${chainKey}:${chainKey === 'SOLANA_MAINNET' || chainKey === 'SOLANA_DEVNET' ? solanaAddressValue : evmWalletAddress ?? 'unknown'}`;
     
     // Step 1: Always try to load cached balances for immediate UI display
-    let cacheHit = false;
+    let cacheState: { hit: boolean; stale: boolean } = { hit: false, stale: false };
     if (!forceRefresh) {
-      cacheHit = loadCachedBalances(cacheKey, chainKey, solanaAddressValue);
-      if (cacheHit && skipNetworkIfCached) {
+      cacheState = loadCachedBalances(cacheKey, chainKey, solanaAddressValue, context);
+      if (cacheState.hit && skipNetworkIfCached && !cacheState.stale) {
         return;
       }
       // Don't return - we still want to trigger async verification
@@ -723,8 +819,11 @@ export default function UserMenu() {
             body: JSON.stringify({
               ...(token ? { accessToken: token } : {}),
               chain: chainKey,
-              ...(forceRefresh ? { forceRefresh: true } : {}),
-              walletAddress: chainKey === 'SOLANA_MAINNET' || chainKey === 'SOLANA_DEVNET' ? solanaAddressValue ?? undefined : cachedAddress ?? undefined,
+              ...(effectiveForceRefresh ? { forceRefresh: true } : {}),
+              ...(effectiveSkipAsyncVerification ? { skipAsyncVerification: true } : {}),
+              ...(includeAllChains ? { includeAllChains: true } : {}),
+              ...(refreshSelectedChain ? { refreshSelectedChain: true } : {}),
+              walletAddress: chainKey === 'SOLANA_MAINNET' || chainKey === 'SOLANA_DEVNET' ? solanaAddressValue ?? undefined : evmWalletAddress ?? undefined,
             }),
           })
       );
@@ -737,6 +836,79 @@ export default function UserMenu() {
         },
         () => res.json()
       );
+
+      const applyAndCacheChainPayload = (targetChainKey: ChainKey, payload: unknown) => {
+        const fallbackAddress = targetChainKey === 'SOLANA_MAINNET' || targetChainKey === 'SOLANA_DEVNET'
+          ? (solanaWallets[0]?.address ?? cachedSolana ?? null)
+          : null;
+        const normalizedByChain = normalizeBalancesResponse({
+          chainKey: targetChainKey,
+          payload,
+          fallbackSolanaAddress: fallbackAddress,
+        });
+        const normalizedTokensByChain = normalizedByChain.tokens ?? {};
+
+        applyBalanceSnapshot(
+          targetChainKey,
+          {
+            tokens: normalizedTokensByChain,
+            address: normalizedByChain.address,
+            solanaAddress: normalizedByChain.solanaAddress,
+            source: normalizedByChain.source,
+            verifiedAt: normalizedByChain.verifiedAt,
+            timestamp: normalizedByChain.timestamp,
+          },
+          fallbackAddress
+        );
+
+        if (typeof window !== 'undefined') {
+          const addressForCache = targetChainKey === 'SOLANA_MAINNET' || targetChainKey === 'SOLANA_DEVNET'
+            ? (normalizedByChain.solanaAddress ?? fallbackAddress ?? 'unknown')
+            : (normalizedByChain.address ?? evmWalletAddress ?? 'unknown');
+          const perChainCacheKey = `cached:balances:${targetChainKey}:${addressForCache}`;
+          localStorage.setItem(
+            perChainCacheKey,
+            JSON.stringify({
+              chain: targetChainKey,
+              tokens: normalizedTokensByChain,
+              address: normalizedByChain.address,
+              solanaAddress: normalizedByChain.solanaAddress ?? fallbackAddress ?? undefined,
+              timestamp: normalizedByChain.timestamp ?? Date.now(),
+              verifiedAt: normalizedByChain.verifiedAt ?? Date.now(),
+              source: normalizedByChain.source ?? 'blockchain',
+            })
+          );
+        }
+
+        return normalizedByChain;
+      };
+
+      const allChainsPayloadRaw =
+        data && typeof data === 'object' && (data as Record<string, unknown>).allChains
+          ? ((data as Record<string, unknown>).allChains as Partial<Record<ChainKey, unknown>>)
+          : null;
+
+      if (allChainsPayloadRaw && includeAllChains) {
+        const chainKeys = Object.keys(CHAINS) as ChainKey[];
+        chainKeys.forEach((targetChainKey) => {
+          const payloadForChain = allChainsPayloadRaw[targetChainKey];
+          if (!payloadForChain) return;
+          applyAndCacheChainPayload(targetChainKey, payloadForChain);
+        });
+
+        if (!forceRefresh && !skipAsyncVerification) {
+          window.setTimeout(() => {
+            void fetchBalancesForChain(chainKey, {
+              forceRefresh: false,
+              skipNetworkIfCached: false,
+              skipAsyncVerification: true,
+              includeAllChains: true,
+            });
+          }, 1500);
+        }
+
+        return;
+      }
 
       const normalized = normalizeBalancesResponse({
         chainKey,
@@ -771,14 +943,20 @@ export default function UserMenu() {
           })
         );
       }
+
+      if (!forceRefresh && !skipAsyncVerification && normalized.source === 'mongo') {
+        window.setTimeout(() => {
+          void fetchBalancesForChain(chainKey, {
+            forceRefresh: false,
+            skipNetworkIfCached: false,
+            skipAsyncVerification: true,
+          });
+        }, 1500);
+      }
     } catch {
-      setBalancesByChain((prev) => ({
-        ...prev,
-        [chainKey]: {
-          ...(prev[chainKey] ?? {}),
-          tokens: {},
-        },
-      }));
+      // Preserve last-known snapshot on network/parse failures.
+      // If local cache exists, re-apply it; otherwise keep current in-memory state untouched.
+      void loadCachedBalances(cacheKey, chainKey, solanaAddressValue, context);
     } finally {
       if (inFlightBalanceKey.current === cacheKey) {
         inFlightBalanceKey.current = null;
@@ -860,12 +1038,14 @@ export default function UserMenu() {
         const human = formatRawToHuman(entry.balanceAfterRaw, entry.decimals);
         balanceOverrideRef.current[`${chainKey}:${symbol}`] = {
           value: human,
+          raw: entry.balanceAfterRaw,
           expiresAt: Date.now() + 25_000,
         };
         const bucket = (snapshotByChain[chainKey] ??= { tokens: {} });
         bucket.tokens[symbol] = {
           symbol,
           balance: human,
+          balanceRaw: entry.balanceAfterRaw,
           decimals: entry.decimals,
         };
       });
@@ -882,34 +1062,58 @@ export default function UserMenu() {
       forceRefresh,
       chainKey,
       skipNetworkIfCached = false,
+      skipAsyncVerification = false,
+      includeAllChains = false,
+      refreshSelectedChain = false,
     }: {
       forceRefresh: boolean;
       chainKey: ChainKey;
       skipNetworkIfCached?: boolean;
-    }) => {
+      skipAsyncVerification?: boolean;
+      includeAllChains?: boolean;
+      refreshSelectedChain?: boolean;
+    },
+    context?: 'login' | 'refresh' | 'openWallet' | 'changeChain' | 'swapComplete' | 'swapStart'
+    ) => {
       if (!authenticated) {
+        loginPreloadKeyRef.current = null;
         setEvmAddress('');
         setSolanaAddress('');
         setBalancesByChain({} as Record<ChainKey, ApiChainBalances>);
         setIsWalletPanelOpen(false);
         if (typeof window !== 'undefined') {
-          localStorage.removeItem(cachedEvmKey);
           localStorage.removeItem(cachedSolKey);
         }
         return;
       }
 
-      await fetchBalancesForChain(chainKey, { forceRefresh, skipNetworkIfCached });
+      await fetchBalancesForChain(chainKey, {
+        forceRefresh,
+        skipNetworkIfCached,
+        skipAsyncVerification,
+        includeAllChains,
+        refreshSelectedChain,
+      }, context);
     };
 
     const preloadAllChainsOnLogin = async () => {
-      const chainKeys = activeNetworkOptions.map((option) => option.key);
-      if (chainKeys.length === 0) return;
-      await Promise.all(
-        chainKeys.map(async (chainKey) => {
-          await run({ forceRefresh: false, chainKey });
-        })
-      );
+      const preloadIdentityKey = [
+        selectedChain,
+        wallets[0]?.address ?? '',
+        solanaWallets[0]?.address ?? '',
+      ].join('|');
+
+      if (loginPreloadKeyRef.current === preloadIdentityKey) return;
+      loginPreloadKeyRef.current = preloadIdentityKey;
+
+      const firstChain = selectedChain;
+      await run({
+        forceRefresh: false,
+        chainKey: firstChain,
+        includeAllChains: true,
+        skipAsyncVerification: true,
+        refreshSelectedChain: true,
+      }, 'login');
     };
 
     // Login/refresh preload across all chains so every token in Mongo-backed balances is cached client-side.
@@ -917,7 +1121,7 @@ export default function UserMenu() {
 
     const handleWalletOpen = () => {
       // Wallet-open should render from cache; only hit API when cache entry is missing.
-      void run({ forceRefresh: false, chainKey: selectedChain, skipNetworkIfCached: true });
+      void run({ forceRefresh: false, chainKey: selectedChain, skipNetworkIfCached: true }, 'openWallet');
     };
 
     if (typeof window !== 'undefined') {
@@ -955,9 +1159,9 @@ export default function UserMenu() {
               markCacheAsStale(chainKey, solanaAddress);
             }
           } else {
-            const evmAddress = typeof window !== 'undefined' ? localStorage.getItem(cachedEvmKey) : null;
-            if (evmAddress) {
-              markCacheAsStale(chainKey, evmAddress);
+            const evmAddressForStale = wallets[0]?.address?.toLowerCase() ?? null;
+            if (evmAddressForStale) {
+              markCacheAsStale(chainKey, evmAddressForStale);
             }
           }
         });
@@ -965,16 +1169,99 @@ export default function UserMenu() {
         // Force-refresh every affected chain for durable reconciliation,
         // independent of currently selectedChain.
         affectedChains.forEach((chainKey) => {
-          void run({ forceRefresh: true, chainKey });
+          void run({ forceRefresh: false, chainKey, skipAsyncVerification: true }, 'swapComplete');
         });
       }
 
-      if (detail?.chain && detail.chain !== selectedChain) return;
-      void run({ forceRefresh: true, chainKey: selectedChain });
+      if (detail?.chain) {
+        void run({ forceRefresh: false, chainKey: detail.chain, skipAsyncVerification: true }, 'swapComplete');
+        if (detail.chain !== selectedChain) return;
+      }
+      void run({ forceRefresh: false, chainKey: selectedChain, skipAsyncVerification: true }, 'swapComplete');
+    };
+
+    const handleBalanceStale = (event: Event) => {
+      const detail = (event as CustomEvent).detail as {
+        chainKey: ChainKey;
+        symbol: string;
+        reason: 'swap' | 'timer' | 'manual';
+        timestamp: number;
+      };
+      
+      // Update the token's staleness state in balancesByChain
+      setBalancesByChain((prev) => {
+        const chainBalances = prev[detail.chainKey];
+        if (!chainBalances?.tokens?.[detail.symbol]) return prev;
+        
+        const updatedTokens = { ...chainBalances.tokens };
+        updatedTokens[detail.symbol] = {
+          ...updatedTokens[detail.symbol],
+          isStale: true,
+          staleReason: detail.reason,
+          staleSince: detail.timestamp,
+        };
+        
+        return {
+          ...prev,
+          [detail.chainKey]: {
+            ...chainBalances,
+            tokens: updatedTokens,
+          },
+        };
+      });
+
+      // Trigger balance verification when swap starts
+      if (detail.reason === 'swap') {
+        // Use swapStart context to trigger time-based staleness checking
+        fetchBalancesForChain(detail.chainKey, {
+          forceRefresh: false,
+          skipNetworkIfCached: false,
+          skipAsyncVerification: false,
+          includeAllChains: false,
+          refreshSelectedChain: false,
+        }, 'swapStart');
+      }
+    };
+
+    const handleBalanceUpdated = (event: Event) => {
+      const detail = (event as CustomEvent).detail as {
+        chainKey: ChainKey;
+        symbol: string;
+        balance: string;
+        decimals: number;
+        source: 'cache' | 'mongo' | 'blockchain' | 'stale';
+        timestamp: number;
+      };
+      
+      // Update the token balance and clear staleness
+      setBalancesByChain((prev) => {
+        const chainBalances = prev[detail.chainKey];
+        const existingToken = chainBalances?.tokens?.[detail.symbol];
+        
+        const updatedTokens = { ...(chainBalances?.tokens ?? {}) };
+        updatedTokens[detail.symbol] = {
+          ...existingToken,
+          balance: detail.balance,
+          decimals: detail.decimals,
+          isStale: false,
+          staleReason: undefined,
+          staleSince: undefined,
+        };
+        
+        return {
+          ...prev,
+          [detail.chainKey]: {
+            ...(chainBalances ?? { tokens: {} }),
+            tokens: updatedTokens,
+          },
+        };
+      });
     };
 
     if (typeof window !== 'undefined') {
       window.addEventListener('altair:swap-complete', handleSwapComplete);
+      window.addEventListener('altair:balance-stale', handleBalanceStale);
+      window.addEventListener('altair:balance-updated', handleBalanceUpdated);
     }
 
     return () => {
@@ -982,6 +1269,8 @@ export default function UserMenu() {
       if (typeof window !== 'undefined') {
         window.removeEventListener('altair:swap-complete', handleSwapComplete);
         window.removeEventListener('altair:wallet-open', handleWalletOpen);
+        window.removeEventListener('altair:balance-stale', handleBalanceStale);
+        window.removeEventListener('altair:balance-updated', handleBalanceUpdated);
       }
     };
   }, [authenticated, selectedChain, wallets, solanaWallets, activeNetworkOptions]);
@@ -1535,7 +1824,7 @@ export default function UserMenu() {
           ),
         );
         if (chainKey !== 'ALL') {
-          void fetchBalancesForChain(chainKey, { forceRefresh: false, skipNetworkIfCached: true });
+          void fetchBalancesForChain(chainKey, { forceRefresh: false, skipNetworkIfCached: true }, 'changeChain');
         }
       }}
       buttonHeight={buttonHeight}
@@ -1835,7 +2124,7 @@ export default function UserMenu() {
         setIsAddPanelChainOpen(false);
         addWalletPanel(chainKey);
         if (chainKey !== 'ALL') {
-          void fetchBalancesForChain(chainKey, { forceRefresh: false, skipNetworkIfCached: true });
+          void fetchBalancesForChain(chainKey, { forceRefresh: false, skipNetworkIfCached: true }, 'changeChain');
         }
       }}
     />
@@ -2153,7 +2442,7 @@ export default function UserMenu() {
                 const next = !current;
                 if (next) {
                   initWalletPanels();
-                  void fetchBalancesForChain(selectedChain, { forceRefresh: false, skipNetworkIfCached: true });
+                  void fetchBalancesForChain(selectedChain, { forceRefresh: false, skipNetworkIfCached: true }, 'openWallet');
                 } else {
                   setWalletPanels((existing) => (existing.length === 1 ? [] : existing));
                 }

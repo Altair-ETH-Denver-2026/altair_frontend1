@@ -1,4 +1,4 @@
-import type { ChainKey } from './blockchain_config';
+import type { ChainKey } from '../../config/blockchain_config';
 
 export type ApiBalanceSource = 'cache' | 'mongo' | 'blockchain' | 'stale';
 
@@ -11,6 +11,9 @@ export type ApiTokenBalance = {
   balanceRaw?: string;
   source?: ApiBalanceSource;
   verifiedAt?: number;
+  isStale?: boolean; // NEW: indicates if this token balance is stale
+  staleReason?: 'swap' | 'timer' | 'manual'; // NEW: why it became stale
+  staleSince?: number; // NEW: timestamp when it became stale
 };
 
 export type ApiChainBalances = {
