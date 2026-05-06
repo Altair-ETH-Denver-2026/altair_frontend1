@@ -17,6 +17,8 @@ import { withWaitLogger } from './waitLogger';
 import type { RelayQuoteRequest, RelayQuoteResponse } from './relayTypes';
 import { resolveRelayChainId, resolveRelayToken, toBaseUnits } from './relayMapping';
 import { getBackendBaseUrl } from './backendUrl';
+import { readCachedTokenSnapshot } from './useSwap';
+import { dispatchSwapSubmitted, dispatchBalanceStale } from './eventTypes';
 
 type RelayIntent = {
   type: 'CROSS_CHAIN_SWAP_INTENT' | 'BRIDGE_INTENT';
@@ -170,79 +172,6 @@ export const useRelay = () => {
     };
 
     return walk(relayQuote, 0);
-  };
-
-  const fetchTrackedBalanceRaw = async (params: {
-    backendBaseUrl: string;
-    chainKey: string;
-    walletAddress: string | null;
-    symbol: string;
-    decimals: number;
-    accessToken?: string | null;
-  }): Promise<string | null> => {
-    const { backendBaseUrl, chainKey, walletAddress, symbol, decimals, accessToken } = params;
-    if (!walletAddress) return null;
-    const normalizedSymbol = symbol.trim().toUpperCase();
-    if (!normalizedSymbol) return null;
-    const normalizedChainKey = normalizeBalanceChainKey(chainKey);
-
-    try {
-      const response = await withWaitLogger(
-        {
-          file: 'altair_frontend1/src/lib/useRelay.ts',
-          target: '/api/balances',
-          description: 'Relay balance snapshot',
-        },
-        () =>
-          fetch(`${backendBaseUrl}/api/balances`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify({
-              chain: normalizedChainKey,
-              walletAddress,
-              accessToken: accessToken ?? null,
-            }),
-          })
-      );
-
-      if (!response.ok) {
-        console.warn('[Relay] balance snapshot request failed', {
-          chainKey,
-          normalizedChainKey,
-          walletAddress,
-          symbol,
-          status: response.status,
-        });
-        return null;
-      }
-      const payload = (await response.json()) as Record<string, unknown>;
-      const tokens = payload?.tokens as Record<string, { balance?: unknown }> | undefined;
-      const tokenEntry = tokens?.[normalizedSymbol] ??
-        Object.values(tokens ?? {}).find((entry) => {
-          if (!entry || typeof entry !== 'object') return false;
-          const candidate = (entry as Record<string, unknown>).symbol;
-          return typeof candidate === 'string' && candidate.trim().toUpperCase() === normalizedSymbol;
-        });
-      const humanAmount = tokenEntry?.balance;
-      if (typeof humanAmount === 'number' && Number.isFinite(humanAmount) && humanAmount >= 0) {
-        return toBaseUnits(humanAmount.toString(), decimals);
-      }
-      if (typeof humanAmount !== 'string' || humanAmount.trim().length === 0) {
-        console.warn('[Relay] balance snapshot payload missing expected field', {
-          chainKey,
-          normalizedChainKey,
-          walletAddress,
-          symbol,
-          normalizedSymbol,
-          payloadKeys: Object.keys(payload ?? {}),
-        });
-        return null;
-      }
-      return toBaseUnits(humanAmount.trim(), decimals);
-    } catch {
-      return null;
-    }
   };
 
   const buildJupiterError = (err: unknown, logs?: string[] | null) => {
@@ -587,22 +516,28 @@ export const useRelay = () => {
     const cachedToken = await getCachedPrivyAccessToken(getAccessToken).catch(() => null);
     const sellWalletAddress = isSolanaOrigin ? solanaUser ?? null : evmAddress ?? null;
     const buyWalletAddress = isSolanaDestination ? solanaRecipient ?? null : evmAddress ?? null;
-    const sellBalanceBeforeRaw = await fetchTrackedBalanceRaw({
-      backendBaseUrl,
-      chainKey: intent.sellTokenChain,
+    const sellChainKey = normalizeBalanceChainKey(intent.sellTokenChain);
+    const buyChainKey = normalizeBalanceChainKey(intent.buyTokenChain);
+    const sellSnapshot = readCachedTokenSnapshot({
+      chainKey: sellChainKey as 'BASE_MAINNET' | 'BASE_SEPOLIA' | 'ETH_MAINNET' | 'ETH_SEPOLIA' | 'SOLANA_MAINNET' | 'SOLANA_DEVNET',
       walletAddress: sellWalletAddress,
       symbol: originToken.symbol ?? intent.sell,
-      decimals: originToken.decimals,
-      accessToken: cachedToken,
     });
-    const buyBalanceBeforeRaw = await fetchTrackedBalanceRaw({
-      backendBaseUrl,
-      chainKey: intent.buyTokenChain,
+    const buySnapshot = readCachedTokenSnapshot({
+      chainKey: buyChainKey as 'BASE_MAINNET' | 'BASE_SEPOLIA' | 'ETH_MAINNET' | 'ETH_SEPOLIA' | 'SOLANA_MAINNET' | 'SOLANA_DEVNET',
       walletAddress: buyWalletAddress,
       symbol: destinationToken.symbol ?? buySymbol,
-      decimals: destinationToken.decimals,
-      accessToken: cachedToken,
     });
+    const gasTokenMeta = resolveNativeGasTokenMeta(originChainId);
+    const gasSymbol = gasTokenMeta?.symbol ?? (isSolanaOrigin ? 'SOL' : 'ETH');
+    const gasSnapshot = readCachedTokenSnapshot({
+      chainKey: sellChainKey as 'BASE_MAINNET' | 'BASE_SEPOLIA' | 'ETH_MAINNET' | 'ETH_SEPOLIA' | 'SOLANA_MAINNET' | 'SOLANA_DEVNET',
+      walletAddress: sellWalletAddress,
+      symbol: gasSymbol,
+    });
+    const sellBalanceBeforeRaw = sellSnapshot.raw;
+    const buyBalanceBeforeRaw = buySnapshot.raw;
+    const gasBalanceBeforeRaw = gasSnapshot.raw;
 
     const relayRequest: RelayQuoteRequest = {
       user: isSolanaOrigin ? solanaUser ?? '' : evmAddress ?? '',
@@ -637,6 +572,7 @@ export const useRelay = () => {
     let relayQuote: RelayQuoteResponse | null = null;
     let quoteReceivedAtMs = 0;
     let totalRelayGasPaidRaw = 0n;
+    let altairFeeMeta: { token: string; amount: string | null; decimals: number | null; bps: number } | null = null;
 
     for (let quoteAttempt = 1; quoteAttempt <= maxQuoteAttempts; quoteAttempt += 1) {
       relayQuote = await withWaitLogger(
@@ -660,6 +596,9 @@ export const useRelay = () => {
         }
       );
       quoteReceivedAtMs = Date.now();
+
+      // Extract _altairFee metadata from the quote response
+      altairFeeMeta = relayQuote?._altairFee ?? null;
 
       requestId = null;
       for (const step of relayQuote.steps) {
@@ -755,6 +694,46 @@ export const useRelay = () => {
             );
             const txHash = typeof signature === 'string' ? signature : bs58.encode(signature);
             console.log('[Relay] Solana transaction signature', txHash);
+            
+            // Dispatch swap-submitted event for relay transaction
+            const sellChainKey = normalizeBalanceChainKey(intent.sellTokenChain) as 'BASE_MAINNET' | 'BASE_SEPOLIA' | 'ETH_MAINNET' | 'ETH_SEPOLIA' | 'SOLANA_MAINNET' | 'SOLANA_DEVNET';
+            const buyChainKey = normalizeBalanceChainKey(intent.buyTokenChain) as 'BASE_MAINNET' | 'BASE_SEPOLIA' | 'ETH_MAINNET' | 'ETH_SEPOLIA' | 'SOLANA_MAINNET' | 'SOLANA_DEVNET';
+            
+            dispatchSwapSubmitted({
+              sellToken: intent.sell?.toUpperCase() || '',
+              buyToken: intent.type === 'BRIDGE_INTENT' ? intent.sell?.toUpperCase() || '' : intent.buy?.toUpperCase() || '',
+              sellChain: sellChainKey,
+              buyChain: buyChainKey,
+              amount: intent.amount,
+              txHash,
+              timestamp: Date.now(),
+            });
+            
+            // Mark involved tokens as stale due to swap initiation
+            const now = Date.now();
+            const tokensToMarkStale = new Set([
+              intent.sell?.toUpperCase(),
+              intent.type === 'BRIDGE_INTENT' ? intent.sell?.toUpperCase() : intent.buy?.toUpperCase(),
+            ]);
+            tokensToMarkStale.forEach((symbol) => {
+              if (symbol) {
+                dispatchBalanceStale({
+                  chainKey: sellChainKey,
+                  symbol,
+                  reason: 'swap',
+                  timestamp: now,
+                });
+                // Also mark on destination chain for cross-chain swaps
+                if (intent.type === 'CROSS_CHAIN_SWAP_INTENT' || intent.type === 'BRIDGE_INTENT') {
+                  dispatchBalanceStale({
+                    chainKey: buyChainKey,
+                    symbol,
+                    reason: 'swap',
+                    timestamp: now,
+                  });
+                }
+              }
+            });
             try {
               const feeLamports = await withWaitLogger(
                 {
@@ -1138,162 +1117,169 @@ export const useRelay = () => {
       throw new Error('Relay quote response was empty.');
     }
 
-    const sellBalanceAfterRaw = await fetchTrackedBalanceRaw({
-      backendBaseUrl,
-      chainKey: intent.sellTokenChain,
-      walletAddress: sellWalletAddress,
-      symbol: originToken.symbol ?? intent.sell,
-      decimals: originToken.decimals,
-      accessToken: cachedToken,
-    });
-    const buyBalanceAfterRaw = await fetchTrackedBalanceRaw({
-      backendBaseUrl,
-      chainKey: intent.buyTokenChain,
-      walletAddress: buyWalletAddress,
-      symbol: destinationToken.symbol ?? buySymbol,
-      decimals: destinationToken.decimals,
-      accessToken: cachedToken,
-    });
-
     const quotedBuyAmountRaw = extractRelayQuotedBuyAmountRaw({
       relayQuote,
       destinationDecimals: destinationToken.decimals,
     });
 
-    const buyAmountRaw =
-      quotedBuyAmountRaw ??
-      (buyBalanceBeforeRaw !== null && buyBalanceAfterRaw !== null
-        ? (() => {
-            try {
-              const delta = BigInt(buyBalanceAfterRaw) - BigInt(buyBalanceBeforeRaw);
-              return delta > 0n ? delta.toString() : '0';
-            } catch {
-              return '';
-            }
-          })()
-        : '');
+    const buyAmountRaw = quotedBuyAmountRaw ?? '';
 
-    const computedSellBalanceAfterRaw =
-      sellBalanceBeforeRaw !== null
-        ? (() => {
-            try {
-              const next = BigInt(sellBalanceBeforeRaw) - BigInt(amountBase);
-              return (next < 0n ? 0n : next).toString();
-            } catch {
-              return sellBalanceAfterRaw;
-            }
-          })()
-        : sellBalanceAfterRaw;
+    const gasFeeRaw = totalRelayGasPaidRaw > 0n ? totalRelayGasPaidRaw : 0n;
+    const sellSymbolNorm = (originToken.symbol ?? intent.sell).trim().toUpperCase();
+    const buySymbolNorm = (destinationToken.symbol ?? buySymbol).trim().toUpperCase();
+    const gasIsGasSell = sellSymbolNorm === gasSymbol;
+    const gasIsGasBuy = buySymbolNorm === gasSymbol;
 
-    const computedBuyBalanceAfterRaw =
-      buyBalanceBeforeRaw !== null && buyAmountRaw
-        ? (() => {
-            try {
-              return (BigInt(buyBalanceBeforeRaw) + BigInt(buyAmountRaw)).toString();
-            } catch {
-              return buyBalanceAfterRaw;
-            }
-          })()
-        : buyBalanceAfterRaw;
+    // Compute authoritative post-swap balances from known inputs.
+    // sellToken.balanceAfter  = balanceBefore - sellAmount
+    // buyToken.balanceAfter   = balanceBefore + buyAmount  (minus gas if gas token = buy token)
+    // gasToken.balanceAfter   = balanceBefore - gasFee     (only when gas token ≠ sell and ≠ buy)
+    const computedSellBalanceAfterRaw: string | null = (() => {
+      if (!sellBalanceBeforeRaw || !amountBase) return null;
+      try {
+        const before = BigInt(sellBalanceBeforeRaw);
+        const amount = BigInt(amountBase);
+        // If sell token is also the gas token, subtract gas fee too
+        const gas = gasIsGasSell ? gasFeeRaw : 0n;
+        const after = before - amount - gas;
+        return after >= 0n ? after.toString() : '0';
+      } catch {
+        return null;
+      }
+    })();
 
-    console.log('[Relay] writeback amount sources', {
-      quotedBuyAmountRaw,
-      buyBalanceBeforeRaw,
-      buyBalanceAfterRaw,
-      buyAmountRaw,
-    });
+    const computedBuyBalanceAfterRaw: string | null = (() => {
+      if (!buyBalanceBeforeRaw || !buyAmountRaw) return null;
+      try {
+        const before = BigInt(buyBalanceBeforeRaw);
+        const amount = BigInt(buyAmountRaw);
+        // If buy token is also the gas token, subtract gas fee
+        const gas = gasIsGasBuy ? gasFeeRaw : 0n;
+        const after = before + amount - gas;
+        return after >= 0n ? after.toString() : '0';
+      } catch {
+        return null;
+      }
+    })();
+
+    const computedGasBalanceAfterRaw: string | null = (() => {
+      // Only compute standalone gas balance when gas token is neither sell nor buy token
+      if (gasIsGasSell || gasIsGasBuy) return null;
+      if (!gasBalanceBeforeRaw || gasFeeRaw <= 0n) return null;
+      try {
+        const before = BigInt(gasBalanceBeforeRaw);
+        const after = before - gasFeeRaw;
+        return after >= 0n ? after.toString() : '0';
+      } catch {
+        return null;
+      }
+    })();
 
     console.log('[Relay] writeback computed balances', {
       sellBalanceBeforeRaw,
-      sellBalanceAfterRaw,
       computedSellBalanceAfterRaw,
       buyBalanceBeforeRaw,
-      buyBalanceAfterRaw,
       computedBuyBalanceAfterRaw,
+      gasBalanceBeforeRaw,
+      computedGasBalanceAfterRaw,
       sellAmountRaw: amountBase,
       buyAmountRaw,
-      totalRelayGasPaidRaw: totalRelayGasPaidRaw.toString(),
+      gasFeeRaw: gasFeeRaw.toString(),
+      gasIsGasSell,
+      gasIsGasBuy,
     });
+
+    const relayWritebackPayload = {
+      cid: cid ?? null,
+      intentString: intent.type,
+      _altairFee: altairFeeMeta,
+      sellToken: {
+        amount: amountBase,
+        decimals: originToken.decimals,
+        symbol: originToken.symbol ?? intent.sell,
+        contractAddress: originToken.address,
+        chain: intent.sellTokenChain,
+        chainId: originChainId,
+        walletAddress: isSolanaOrigin ? solanaUser ?? null : evmAddress ?? null,
+        balanceBefore: sellBalanceBeforeRaw,
+        balanceAfter: computedSellBalanceAfterRaw,
+        fees: {
+          gas: {
+            token: gasSymbol,
+            amount: gasFeeRaw > 0n ? gasFeeRaw.toString() : '',
+            decimals: gasTokenMeta?.decimals ?? null,
+            balanceBefore: gasBalanceBeforeRaw,
+            balanceAfter: computedGasBalanceAfterRaw,
+          },
+          provider: { token: '', amount: '', decimals: null },
+          altair: { token: '', amount: '', decimals: null },
+        },
+      },
+      buyToken: {
+        amount: buyAmountRaw,
+        decimals: destinationToken.decimals,
+        symbol: destinationToken.symbol ?? buySymbol,
+        contractAddress: destinationToken.address,
+        chain: intent.buyTokenChain,
+        chainId: destinationChainId,
+        walletAddress: isSolanaDestination ? solanaRecipient ?? null : evmAddress ?? null,
+        balanceBefore: buyBalanceBeforeRaw,
+        balanceAfter: computedBuyBalanceAfterRaw,
+        fees: {
+          gas: { token: '', amount: '', decimals: null },
+          provider: { token: '', amount: '', decimals: null },
+          altair: { token: '', amount: '', decimals: null },
+        },
+      },
+      requestId: requestId ?? null,
+    };
+
+    // Dispatch altair:swap-complete after writeback so balanceUpdates from the
+    // backend response can be used for immediate UI updates.
+    let writebackBalanceUpdates: Array<{
+      chain: string;
+      symbol: string;
+      balanceAfterRaw: string | null;
+      decimals: number;
+    }> = [];
+    try {
+      const backendBaseUrl = getBackendBaseUrl();
+      console.log('[Relay] Sending writeback request', {
+        url: `${backendBaseUrl}/api/relay/writeback`,
+        payload: relayWritebackPayload,
+      });
+      const writebackRes = await fetch(`${backendBaseUrl}/api/relay/writeback`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(relayWritebackPayload),
+      });
+      console.log('[Relay] Writeback response status', writebackRes.status);
+      if (!writebackRes.ok) {
+        const errorText = await writebackRes.text();
+        console.error('[Relay] Writeback failed with status', writebackRes.status, errorText);
+        throw new Error(`Writeback failed: ${errorText}`);
+      }
+      const writebackData = await writebackRes.json().catch(() => ({})) as { balanceUpdates?: typeof writebackBalanceUpdates };
+      console.log('[Relay] Writeback response data', writebackData);
+      if (Array.isArray(writebackData?.balanceUpdates)) {
+        writebackBalanceUpdates = writebackData.balanceUpdates;
+      }
+    } catch (err) {
+      console.error('[Relay] writeback failed', err);
+    }
 
     if (typeof window !== 'undefined') {
       window.dispatchEvent(
         new CustomEvent('altair:swap-complete', {
           detail: {
             chain: intent.sellTokenChain,
-            sellToken: (originToken.symbol ?? intent.sell).toUpperCase(),
-            buyToken: (destinationToken.symbol ?? buySymbol).toUpperCase(),
-            balanceUpdates: [
-              {
-                chain: intent.sellTokenChain,
-                symbol: (originToken.symbol ?? intent.sell).toUpperCase(),
-                balanceAfterRaw: computedSellBalanceAfterRaw,
-                decimals: originToken.decimals,
-              },
-              {
-                chain: intent.buyTokenChain,
-                symbol: (destinationToken.symbol ?? buySymbol).toUpperCase(),
-                balanceAfterRaw: computedBuyBalanceAfterRaw,
-                decimals: destinationToken.decimals,
-              },
-            ],
+            sellToken: sellSymbolNorm,
+            buyToken: buySymbolNorm,
+            balanceUpdates: writebackBalanceUpdates,
           },
         })
       );
-    }
-
-    const gasTokenMeta = resolveNativeGasTokenMeta(originChainId);
-
-      const relayWritebackPayload = {
-        cid: cid ?? null,
-        intentString: intent.type,
-        sellToken: {
-          amount: amountBase,
-          decimals: originToken.decimals,
-          symbol: originToken.symbol ?? intent.sell,
-          contractAddress: originToken.address,
-          chain: intent.sellTokenChain,
-          chainId: originChainId,
-          walletAddress: isSolanaOrigin ? solanaUser ?? null : evmAddress ?? null,
-          balanceBefore: sellBalanceBeforeRaw,
-          balanceAfter: computedSellBalanceAfterRaw,
-          fees: {
-            gas: {
-              token: gasTokenMeta?.symbol ?? '',
-              amount: totalRelayGasPaidRaw > 0n ? totalRelayGasPaidRaw.toString() : '',
-              decimals: gasTokenMeta?.decimals ?? null,
-            },
-            provider: { token: '', amount: '', decimals: null },
-            altair: { token: '', amount: '', decimals: null },
-          },
-        },
-        buyToken: {
-          amount: buyAmountRaw,
-          decimals: destinationToken.decimals,
-          symbol: destinationToken.symbol ?? buySymbol,
-          contractAddress: destinationToken.address,
-          chain: intent.buyTokenChain,
-          chainId: destinationChainId,
-          walletAddress: isSolanaDestination ? solanaRecipient ?? null : evmAddress ?? null,
-          balanceBefore: buyBalanceBeforeRaw,
-          balanceAfter: computedBuyBalanceAfterRaw,
-          fees: {
-            gas: { token: '', amount: '', decimals: null },
-            provider: { token: '', amount: '', decimals: null },
-            altair: { token: '', amount: '', decimals: null },
-          },
-        },
-        requestId: requestId ?? null,
-      };
-    try {
-      const backendBaseUrl = getBackendBaseUrl();
-      await fetch(`${backendBaseUrl}/api/relay/writeback`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(relayWritebackPayload),
-      });
-    } catch (err) {
-      console.warn('[Relay] writeback failed', err);
     }
 
     return {
