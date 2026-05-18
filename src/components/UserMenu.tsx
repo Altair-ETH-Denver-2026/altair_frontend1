@@ -12,9 +12,10 @@ import { withWaitLogger } from '../lib/waitLogger';
 import { usePanels } from '../lib/usePanels';
 import { getCachedPrivyAccessToken } from '../lib/privyTokenCache';
 import { PublicKey } from '@solana/web3.js';
-import { UserRound, LogOut, Settings, Wallet, Wrench, Copy, Globe2, Check, Coins } from 'lucide-react';
+import { UserRound, LogOut, Settings, Wallet, Wrench, Copy, Globe2, Check, Coins, ListOrdered } from 'lucide-react';
 import WalletPanel from './panels/WalletPanel';
 import LendPanel from './panels/LendPanel';
+import LimitOrdersPanel from './panels/LimitOrdersPanel';
 import { useLendPositions } from '../lib/useLendPositions';
 import AddPanel from './panels/AddPanel';
 import { SpinningLogo } from './SpinningLogo';
@@ -69,6 +70,7 @@ export default function UserMenu() {
   const [isDevOpen, setIsDevOpen] = useState(false);
   const [isLendPanelOpen, setIsLendPanelOpen] = useState(false);
   const lendData = useLendPositions({ enabled: true });
+  const [isLimitOrdersPanelOpen, setIsLimitOrdersPanelOpen] = useState(false);
   const [isSwapping, setIsSwapping] = useState(false);
   const [swapMessage, setSwapMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [balancesByChain, setBalancesByChain] = useState<Record<ChainKey, ApiChainBalances>>({} as Record<ChainKey, ApiChainBalances>);
@@ -2806,6 +2808,12 @@ export default function UserMenu() {
               onClose={() => setIsLendPanelOpen(false)}
             />
           ) : null}
+          {isLimitOrdersPanelOpen ? (
+            <LimitOrdersPanel
+              width={walletWidth}
+              onClose={() => setIsLimitOrdersPanelOpen(false)}
+            />
+          ) : null}
         </div>
       )}
 
@@ -2815,7 +2823,6 @@ export default function UserMenu() {
           onClick={() => {
             const next = !isLendPanelOpen;
             setIsLendPanelOpen(next);
-            // Make sure the wallet panel container is open so LendPanel is visible.
             if (next && !isWalletPanelOpen) setIsWalletPanelOpen(true);
           }}
           title="Lend (Jupiter Earn · Solana)"
@@ -2832,6 +2839,34 @@ export default function UserMenu() {
           }}
         >
           <Coins
+            style={{ width: `${MENU_ICONS.size * 4}px`, height: `${MENU_ICONS.size * 4}px` }}
+            color={MENU_ICONS.icon_color}
+          />
+        </button>
+      ) : null}
+
+      {/* Limit Orders toggle */}
+      {isWalletPanel ? (
+        <button
+          onClick={() => {
+            const next = !isLimitOrdersPanelOpen;
+            setIsLimitOrdersPanelOpen(next);
+            if (next && !isWalletPanelOpen) setIsWalletPanelOpen(true);
+          }}
+          title="Limit Orders (Jupiter Trigger · Solana)"
+          className="flex items-center justify-center rounded-full border-[var(--border-color)] hover:border-[var(--highlight-color)] transition-all shadow-md cursor-pointer"
+          style={{
+            width: `${MENU_ICONS.size * 4 * 1.6}px`,
+            height: `${MENU_ICONS.size * 4 * 1.6}px`,
+            backgroundColor: MENU_ICONS.container_color,
+            borderColor: isLimitOrdersPanelOpen ? MENU_ICONS.highlight_color : undefined,
+            borderWidth: `${MENU_ICONS.border_width}px`,
+            boxSizing: 'content-box',
+            ['--border-color' as never]: MENU_ICONS.border_color,
+            ['--highlight-color' as never]: MENU_ICONS.highlight_color,
+          }}
+        >
+          <ListOrdered
             style={{ width: `${MENU_ICONS.size * 4}px`, height: `${MENU_ICONS.size * 4}px` }}
             color={MENU_ICONS.icon_color}
           />

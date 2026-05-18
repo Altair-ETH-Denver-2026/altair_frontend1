@@ -477,6 +477,27 @@ export const LEND_WITHDRAW_SUBMITTED = [
   'Lending withdrawal launched.',
 ];
 
+export const LIMIT_ORDER_SUBMITTED = [
+  'Limit order placed.',
+  'Order is queued and waiting on the trigger.',
+  'Your limit order is live.',
+  'Order submitted — I will fire it when the trigger is met.',
+  'Standing order received.',
+  'Got it. Order is sitting on the book.',
+  'Order is in. I will let you know the moment it executes.',
+  'Limit order recorded. Patience is a position.',
+  'Order placed. The market will come to you.',
+  'Your order is parked at the trigger.',
+];
+
+export const LIMIT_ORDER_CANCELED = [
+  'Order canceled.',
+  'Order pulled from the book.',
+  'Canceled. No harm done.',
+  'Order taken down.',
+  'Removed from the queue.',
+];
+
 export const POST_SWAP_SUGGESTIONS_1S = [
   'I’d be delighted to assist you in exploring the different ways TOKEN_SYMBOL can earn value for you, share insights into its fundamentals, or analyze its latest price patterns whenever you wish.',
   'I’m glad to help you examine TOKEN_SYMBOL more closely by outlining its earning potential, explaining what drives it, or reviewing its most recent performance metrics.',
