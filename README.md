@@ -60,7 +60,8 @@ Wallet display mode is configured in [`config/ui_config.ts`](config/ui_config.ts
 - Solana swap: [`src/lib/useSolanaSwap.ts`](src/lib/useSolanaSwap.ts)
 - Solana transfer: [`src/lib/useSolanaTransfer.ts`](src/lib/useSolanaTransfer.ts)
 - Cross-chain relay: [`src/lib/useRelay.ts`](src/lib/useRelay.ts)
-- Jupiter Trigger (limit / scheduled orders): [`src/lib/useJupiterTrigger.ts`](src/lib/useJupiterTrigger.ts)
+- Jupiter Trigger V1 (legacy fallback): [`src/lib/useJupiterTrigger.ts`](src/lib/useJupiterTrigger.ts)
+- Jupiter Trigger V2 (default for price orders): [`src/lib/useJupiterTriggerV2.ts`](src/lib/useJupiterTriggerV2.ts) + [`src/lib/useTriggerV2Auth.ts`](src/lib/useTriggerV2Auth.ts) + [`src/lib/triggerV2Jwt.ts`](src/lib/triggerV2Jwt.ts)
 
 These hooks execute chain actions and emit `altair:swap-complete` (or `altair:balance-stale`) to drive wallet/balance UI updates.
 
@@ -68,10 +69,23 @@ These hooks execute chain actions and emit `altair:swap-complete` (or `altair:ba
 
 When the user says "sell 100 BONK if price hits $0.00003" or "swap 1 SOL to USDC at 6pm tomorrow", the chat model emits a `LIMIT_ORDER_PRICE_INTENT` or `LIMIT_ORDER_TIME_INTENT` (see `INTENTS.LIMIT_ORDER_INTENTS` in `config/ai_config.ts`). The chat panel renders a Place Order / Cancel row (template `CONFIRM_LIMIT_ORDER`). On confirm, [`useJupiterTrigger.executeLimitOrder(...)`](src/lib/useJupiterTrigger.ts):
 
-- For **price** orders: calls the Jupiter Trigger V1 proxy `/api/jupiter/trigger/create-order`, Privy signs+sends the order tx, then the frontend writes back to `/api/limit-orders` with the trigger config.
-- For **time** orders: skips Jupiter (the server-side scheduler is a follow-up) and only writes back to `/api/limit-orders` so the order is tracked and the chat model can remind the user about it.
+- For **price** orders: routes through Jupiter Trigger **V2** by default (vault-based custody, real `orderId` returned up-front, no per-fill user prompts). See "Trigger V2 flow" below. Falls back to V1 if `NEXT_PUBLIC_DISABLE_TRIGGER_V2=true` is set, so V2 can be killed remotely without a redeploy if Jupiter has an incident.
+- For **time** orders: skips Jupiter (the time scheduler runs server-side via Privy delegated signing) and only writes back to `/api/limit-orders`.
 
-The **LimitOrdersPanel** ([`src/components/panels/LimitOrdersPanel.tsx`](src/components/panels/LimitOrdersPanel.tsx)) shows pending orders for the connected Solana wallet and lets the user cancel them. Open it via the **List** icon in the top menu (next to the wallet panel). Today this lists Altair's Mongo-tracked orders; cross-referencing with `/api/jupiter/trigger/orders` for fill status is a follow-up.
+The **LimitOrdersPanel** ([`src/components/panels/LimitOrdersPanel.tsx`](src/components/panels/LimitOrdersPanel.tsx)) shows pending orders for the connected Solana wallet and lets the user cancel them. Open it via the **List** icon in the top menu (next to the wallet panel). Cancel routing depends on `providerVersion`:
+
+- **V1**: PATCH `/api/limit-orders/[LOID]` `{status:'cancelled'}` — soft cancel only (no V1 cancel endpoint is hit because we don't have the create-tx reliably).
+- **V2**: Full 2-step cancel — POST `/api/jupiter/trigger-v2/orders/price/cancel/[orderId]` returns an unsigned withdrawal tx, Privy signs it, then POST `…/confirm-cancel/[orderId]` submits it. Jupiter moves the order to `ready_to_cancel` immediately on step 1, so there's no fill race while the user signs. Finally, our local row is PATCHed with `status='cancelled'` + the withdrawal `fillTxHash`.
+
+#### Trigger V2 flow (price orders)
+
+1. **JWT** — first price-order placement (or first cancel) per Solana wallet calls `useTriggerV2Auth.ensureJwt()`, which runs challenge → Privy `useSignMessage` → verify. The JWT is cached in-memory for 24h via `src/lib/triggerV2Jwt.ts`; subsequent V2 calls within that window are silent. We deliberately do NOT persist the JWT to `localStorage` — re-authenticating is one signMessage prompt.
+2. **Deposit craft** — POST `/api/jupiter/trigger-v2/deposit/craft` returns an unsigned `VersionedTransaction` that moves the sell amount from the user's wallet to their Privy-managed vault.
+3. **Sign** — Privy `useSignTransaction` prompts the user once. The deposit tx is signed but not yet broadcast.
+4. **Create order** — POST `/api/jupiter/trigger-v2/orders/price` with `depositSignedTx` + `triggerCondition` + `triggerPriceUsd` + `expiresAt`. Jupiter submits the deposit on-chain AND registers the order in one round trip; response is `{ id, txSignature }`.
+5. **Writeback** — `/api/limit-orders` POST with `providerVersion: 'v2'`, `depositRequestId`, `vaultPubkey`, V2 trigger fields, and `providerOrderId = id` (the real Jupiter UUID, so future sync-fills can match exactly).
+
+V2 derives `triggerCondition` from intent `side`: SELL → `above`, BUY → `below`. Expiry defaults to 7 days out if `intent.expiry` is absent (Jupiter V2 requires every order to have a future `expiresAt`).
 
 ---
 

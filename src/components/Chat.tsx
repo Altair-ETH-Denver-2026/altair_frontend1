@@ -12,6 +12,7 @@ import { useSwap } from '../lib/useSwap';
 import { useSolanaSwap } from '../lib/useSolanaSwap';
 import { useRelay } from '../lib/useRelay';
 import { useJupiterTrigger } from '../lib/useJupiterTrigger';
+import { useJupiterTriggerV2 } from '../lib/useJupiterTriggerV2';
 import { getCachedPrivyAccessToken } from '../lib/privyTokenCache';
 import { dispatchSwapInitiated } from '../lib/eventTypes';
 import { BLOCKCHAIN, CHAINS, type ChainKey } from '../../config/blockchain_config';
@@ -67,7 +68,24 @@ export default function Chat() {
   const executeSwap = useSwap();
   const executeSolanaSwap = useSolanaSwap();
   const executeRelay = useRelay();
-  const { executeLimitOrder } = useJupiterTrigger();
+  const { executeLimitOrder: executeLimitOrderV1 } = useJupiterTrigger();
+  const { executeLimitOrder: executeLimitOrderV2 } = useJupiterTriggerV2();
+
+  // Route price-triggered orders through V2 (vault-based custody, real
+  // orderId, no per-fill prompts). Time-triggered orders go through V1
+  // because the time scheduler doesn't care which trigger generation we used.
+  // Falls back to V1 if NEXT_PUBLIC_DISABLE_TRIGGER_V2=true is set, so we can
+  // kill the V2 path remotely without a redeploy if Jupiter has an incident.
+  const triggerV2Disabled = process.env.NEXT_PUBLIC_DISABLE_TRIGGER_V2 === 'true';
+  const executeLimitOrder = async (
+    intent: ChatLimitOrderIntent,
+    opts: { CID?: string | null } = {}
+  ) => {
+    if (triggerV2Disabled || intent.type === 'LIMIT_ORDER_TIME_INTENT') {
+      return executeLimitOrderV1(intent, opts);
+    }
+    return executeLimitOrderV2(intent, opts);
+  };
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
