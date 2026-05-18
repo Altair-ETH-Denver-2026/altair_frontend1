@@ -11,6 +11,7 @@ import { getBackendBaseUrl } from '../lib/backendUrl';
 import { useSwap } from '../lib/useSwap';
 import { useSolanaSwap } from '../lib/useSolanaSwap';
 import { useRelay } from '../lib/useRelay';
+import { useJupiterTrigger } from '../lib/useJupiterTrigger';
 import { getCachedPrivyAccessToken } from '../lib/privyTokenCache';
 import { dispatchSwapInitiated } from '../lib/eventTypes';
 import { BLOCKCHAIN, CHAINS, type ChainKey } from '../../config/blockchain_config';
@@ -20,10 +21,12 @@ import { CHAT_BUTTON_ROW_TEMPLATES } from '../../config/ai_config';
 import {
   buildChatButtonRowFromIntent,
   buildChatButtonRowFromLogicTrigger,
+  type ChatActionableIntent,
   type ChatButtonItem,
   type ChatButtonRowModel,
   type ChatSwapIntent,
 } from '../lib/chatButtonRows';
+import { isLimitOrderIntent, type ChatLimitOrderIntent } from '../lib/limitOrderTypes';
 import ChatButtonRow from './ChatButtonRow';
 
 interface Message {
@@ -64,6 +67,7 @@ export default function Chat() {
   const executeSwap = useSwap();
   const executeSolanaSwap = useSolanaSwap();
   const executeRelay = useRelay();
+  const { executeLimitOrder } = useJupiterTrigger();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -135,6 +139,24 @@ export default function Chat() {
       return parseCandidate(trimmed.slice(firstBrace, lastBrace + 1));
     }
 
+    return null;
+  };
+
+  /**
+   * Generic intent extractor. Returns either a swap intent OR a limit-order intent.
+   * Used for routing: any actionable intent → CONFIRM button row.
+   */
+  const extractAnyIntent = (text: string): ChatActionableIntent | null => {
+    const parsed = extractSwapIntent(text) as unknown as Record<string, unknown> | null;
+    if (!parsed || typeof parsed !== 'object') return null;
+    if (isLimitOrderIntent(parsed)) return parsed as ChatLimitOrderIntent;
+    if (
+      parsed.type === 'SINGLE_CHAIN_SWAP_INTENT' ||
+      parsed.type === 'CROSS_CHAIN_SWAP_INTENT' ||
+      parsed.type === 'BRIDGE_INTENT'
+    ) {
+      return parsed as unknown as ChatSwapIntent;
+    }
     return null;
   };
 
@@ -487,6 +509,18 @@ export default function Chat() {
     return responseList[randomIndex] ?? 'Swap confirmed!';
   };
 
+  const getRandomLimitOrderSubmittedMessage = () => {
+    const responseList = [
+      ...((CHAT_BUTTON_ROW_TEMPLATES as Record<string, { responseList?: readonly string[] }>)
+        .CONFIRM_LIMIT_ORDER?.responseList ?? []),
+    ] as string[];
+    if (responseList.length <= 0) {
+      return 'Limit order placed.';
+    }
+    const randomIndex = Math.floor(Math.random() * responseList.length);
+    return responseList[randomIndex] ?? 'Limit order placed.';
+  };
+
   const requestChatResponse = async (params: {
     userMessage: string;
     history: Message[];
@@ -609,8 +643,11 @@ export default function Chat() {
     setIsLoading(true);
     try {
       const data = await requestChatResponse({ userMessage, history: historySnapshot, clientRequestId });
-      const intent = extractSwapIntent(data.content);
-      
+      const anyIntent = extractAnyIntent(data.content);
+      const limitOrderIntent = isLimitOrderIntent(anyIntent) ? (anyIntent as ChatLimitOrderIntent) : null;
+      // Swap intent only (limit orders shouldn't go through the swap auto-exec path).
+      const intent = limitOrderIntent ? null : (anyIntent as SwapIntent | null);
+
       // Dispatch swap-initiated event when AI generates a swap intent
       if (intent && intent.type) {
         const selectedChain = resolveIntentChain(intent);
@@ -648,7 +685,7 @@ export default function Chat() {
       const chatButtonRow = executionNote
         ? null
         : buildChatButtonRowFromIntent({
-            intent,
+            intent: limitOrderIntent ?? intent,
             cid: data?.cid ?? null,
           });
 
@@ -730,11 +767,38 @@ export default function Chat() {
       if (button.action.kind === 'RUN_LOCAL') {
         const instantMessage = button.action.actionId === 'CONFIRM_SWAP'
           ? getRandomSwapSubmittedMessage()
-          : button.action.presetAssistantMessage;
+          : button.action.actionId === 'CONFIRM_LIMIT_ORDER'
+            ? getRandomLimitOrderSubmittedMessage()
+            : button.action.presetAssistantMessage;
         addInstantAssistantMessage(instantMessage);
         if (button.action.actionId === 'CANCEL_SWAP') {
           setPendingIntent(null);
           console.log('[ChatButtonRow] action cancel swap', { rowId: row.id });
+          return;
+        }
+        if (button.action.actionId === 'CANCEL_LIMIT_ORDER') {
+          console.log('[ChatButtonRow] action cancel limit order', { rowId: row.id });
+          return;
+        }
+        if (button.action.actionId === 'CONFIRM_LIMIT_ORDER') {
+          const intent = row.context?.intent;
+          if (!intent || !isLimitOrderIntent(intent)) {
+            addInstantAssistantMessage('Limit order intent was lost — please re-issue the order.');
+            return;
+          }
+          try {
+            const result = await executeLimitOrder(intent as ChatLimitOrderIntent, {
+              CID: row.context?.cid ?? null,
+            });
+            const tail = result.kind === 'time'
+              ? `Scheduled for ${intent.runAt ?? 'the requested time'}.`
+              : `Trigger at ${intent.targetPrice} ${(intent.quoteCurrency ?? 'USDC').toUpperCase()}/${intent.sell.toUpperCase()}.`;
+            const txTail = result.txHash ? ` tx ${result.txHash.slice(0, 8)}…` : '';
+            addInstantAssistantMessage(`${tail}${txTail}`);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            addInstantAssistantMessage(`Limit order failed: ${msg}`);
+          }
           return;
         }
         if (button.action.actionId === 'CONFIRM_SWAP') {
