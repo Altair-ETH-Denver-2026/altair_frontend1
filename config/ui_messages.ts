@@ -451,6 +451,32 @@ export const SWAP_SUBMITTED = [
   'Transaction executed perfectly.',
 ];
 
+export const LEND_DEPOSIT_SUBMITTED = [
+  'Lend deposit submitted.',
+  'Your deposit is on its way to the lending vault.',
+  'Lending deposit transaction sent.',
+  'Earning vault deposit submitted.',
+  'Your tokens are heading to the lending pool.',
+  'Deposit transaction broadcast—you will start earning shortly.',
+  'Lend deposit confirmed and sent to the network.',
+  'Your lending deposit is live on-chain.',
+  'Deposit transaction submitted—earning begins after confirmation.',
+  'Lending transaction launched.',
+];
+
+export const LEND_WITHDRAW_SUBMITTED = [
+  'Lend withdraw submitted.',
+  'Your withdrawal is on its way back to your wallet.',
+  'Lending withdraw transaction sent.',
+  'Earning vault withdrawal submitted.',
+  'Tokens are being released from the lending pool.',
+  'Withdraw transaction broadcast—funds returning soon.',
+  'Lend withdraw confirmed and sent to the network.',
+  'Your lending withdrawal is live on-chain.',
+  'Withdraw transaction submitted—settlement underway.',
+  'Lending withdrawal launched.',
+];
+
 export const POST_SWAP_SUGGESTIONS_1S = [
   'I’d be delighted to assist you in exploring the different ways TOKEN_SYMBOL can earn value for you, share insights into its fundamentals, or analyze its latest price patterns whenever you wish.',
   'I’m glad to help you examine TOKEN_SYMBOL more closely by outlining its earning potential, explaining what drives it, or reviewing its most recent performance metrics.',

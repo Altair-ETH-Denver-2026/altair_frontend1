@@ -1,4 +1,4 @@
-import { SWAP_SUBMITTED } from './ui_messages';
+import { LEND_DEPOSIT_SUBMITTED, LEND_WITHDRAW_SUBMITTED, SWAP_SUBMITTED } from './ui_messages';
 
 export const LLM_MODELS = {
   runningSummary: [
@@ -93,9 +93,13 @@ export const INTENTS = {
     BRIDGE_INTENT: `If the user wants to bridge a token (same token across chains), return JSON:
       { "type": "BRIDGE_INTENT", "sell": "<SELL_TOKEN>", "amount": "<AMOUNT>", "sellTokenChain": "<SELL_TOKEN_CHAIN>", "buyTokenChain": "<BUY_TOKEN_CHAIN>" }`,
   },
-  // DEFI_INTENTS {
-  //    deposit/withdraw into LP
-  //    deposit/withdraw loan}
+  LEND_INTENTS: {
+    LEND_DEPOSIT_INTENT: `If the user wants to deposit a token into a Jupiter Lend (Earn) vault to earn yield on Solana, return JSON:
+      { "type": "LEND_DEPOSIT_INTENT", "token": "<TOKEN>", "amount": "<AMOUNT>", "tokenChain": "SOLANA_MAINNET", "provider": "Jupiter" }`,
+    LEND_WITHDRAW_INTENT: `If the user wants to withdraw lent funds from a Jupiter Lend (Earn) vault, return JSON. Use "amount": "all" to withdraw the full position:
+      { "type": "LEND_WITHDRAW_INTENT", "token": "<TOKEN>", "amount": "<AMOUNT_OR_ALL>", "tokenChain": "SOLANA_MAINNET", "provider": "Jupiter" }`,
+  },
+  // LIMIT_ORDER_INTENTS (next feature): price-trigger via Jupiter Trigger API; date-trigger via Altair scheduler.
   // UI_INTENTS {
   //    BUTTONS}
 };
@@ -158,6 +162,54 @@ export const CHAT_BUTTON_ROW_TEMPLATES = {
       },
     ],
   },
+  CONFIRM_LEND_DEPOSIT: {
+    intentTriggers: ['LEND_INTENTS.LEND_DEPOSIT_INTENT'],
+    responseList: LEND_DEPOSIT_SUBMITTED,
+    buttons: [
+      {
+        id: 'confirm',
+        label: 'Confirm',
+        action: {
+          kind: 'RUN_LOCAL',
+          actionId: 'CONFIRM_LEND_DEPOSIT',
+          presetAssistantMessage: 'Lend deposit confirmed!',
+        },
+      },
+      {
+        id: 'cancel',
+        label: 'Cancel',
+        action: {
+          kind: 'RUN_LOCAL',
+          actionId: 'CANCEL_LEND_DEPOSIT',
+          presetAssistantMessage: 'Lend deposit canceled.',
+        },
+      },
+    ],
+  },
+  CONFIRM_LEND_WITHDRAW: {
+    intentTriggers: ['LEND_INTENTS.LEND_WITHDRAW_INTENT'],
+    responseList: LEND_WITHDRAW_SUBMITTED,
+    buttons: [
+      {
+        id: 'confirm',
+        label: 'Confirm',
+        action: {
+          kind: 'RUN_LOCAL',
+          actionId: 'CONFIRM_LEND_WITHDRAW',
+          presetAssistantMessage: 'Lend withdraw confirmed!',
+        },
+      },
+      {
+        id: 'cancel',
+        label: 'Cancel',
+        action: {
+          kind: 'RUN_LOCAL',
+          actionId: 'CANCEL_LEND_WITHDRAW',
+          presetAssistantMessage: 'Lend withdraw canceled.',
+        },
+      },
+    ],
+  },
 } as const;
 
 
@@ -170,20 +222,32 @@ export const SYSTEM_PROMPT = {
       - If the user specifies a buy token chain and it differs from the Selected Chain, emit CROSS_CHAIN_SWAP_INTENT.
       - If the user specifies a sell token chain explicitly, emit CROSS_CHAIN_SWAP_INTENT.
       - If the user explicitly says "bridge", emit BRIDGE_INTENT.
+      - If the user wants to lend / earn / supply / put to work / deposit into a vault for yield on Solana (e.g.
+        "lend 10 USDC", "earn on my USDC", "put my SOL to work"), emit LEND_DEPOSIT_INTENT (provider Jupiter,
+        tokenChain SOLANA_MAINNET). Only Jupiter Lend (Solana) is supported right now.
+      - If the user wants to withdraw / unstake / pull / cash out lent or earning funds (e.g.
+        "withdraw my lent USDC", "pull out my USDC earning", "withdraw all my lent USDC"), emit LEND_WITHDRAW_INTENT.
+        If they say "all" or "everything", set amount to "all".
       - Otherwise, emit SINGLE_CHAIN_SWAP_INTENT.
 
       Ask only for missing fields that cannot be inferred from the message or the Selected Chain.
 
       If you are ready to execute, ask the user for confirmation and include an estimated amount of the buy token they would receive (label it as an estimate). Example:
       "You are about to swap <SELL_AMOUNT> ETH for USDC. Estimated USDC to receive: <BUY_AMOUNT_ESTIMATE> USDC. Do you confirm?"
+      For LEND_DEPOSIT_INTENT or LEND_WITHDRAW_INTENT, always quote the current APY in your confirmation message
+      when it is available in the Lend Markets context block, and label it as an estimate. Example:
+      "You are about to lend <AMOUNT> USDC on Solana via Jupiter Lend (estimated APY ~<APY>%). Do you confirm?"
+
       Always include the intent JSON when you detect an intent, even before confirmation. Still ask for confirmation before execution.
 
       ${INTENTS.SWAP_INTENTS.SINGLE_CHAIN_SWAP_INTENT}
       ${INTENTS.SWAP_INTENTS.CROSS_CHAIN_SWAP_INTENT}
       ${INTENTS.SWAP_INTENTS.BRIDGE_INTENT}
-      
+      ${INTENTS.LEND_INTENTS.LEND_DEPOSIT_INTENT}
+      ${INTENTS.LEND_INTENTS.LEND_WITHDRAW_INTENT}
+
       Use the user memory context as helpful background, but prioritize the latest user message if there is any conflict.
-    `, // core system instruction that defines Altair's trading-assistant persona and swap intent protocol
+    `, // core system instruction that defines Altair's trading-assistant persona and swap/lend intent protocol
   contextBlocks: {
     selectedChainBlock: {
       withData: '\nSelected Chain (from UI): ${selectedChain}',
@@ -200,6 +264,14 @@ export const SYSTEM_PROMPT = {
     swapsBlock: {
       withData: `\nRecent Swaps (last 3 from MongoDB; may be stale):\n\${JSON.stringify(swapHistoryContext)}`, // supplies recent swaps for continuity and safety checks
       empty: '\nRecent Swaps: none available yet.', // fallback when no swap history exists
+    },
+    lendMarketsBlock: {
+      withData: `\nLend Markets (Jupiter Lend Earn on Solana; may be stale):\n\${JSON.stringify(lendMarketsContext)}`, // injected list of supported lend tokens + APYs so the model can quote rates
+      empty: '\nLend Markets: none available yet.', // fallback when Lend tokens are unavailable
+    },
+    lendPositionsBlock: {
+      withData: `\nUser Lend Positions (MongoDB snapshot; may be stale):\n\${JSON.stringify(lendPositionsContext)}`, // user's current lend positions for follow-up withdraw / status questions
+      empty: '\nUser Lend Positions: none available yet.', // fallback when user has no lend positions
     },
   },
 };
