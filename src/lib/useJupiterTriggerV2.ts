@@ -82,7 +82,8 @@ export type LimitOrderV2ExecuteResult = {
  *
  * Flow (per price-order intent):
  *   1. Ensure a V2 JWT (cached 24h; first call prompts a one-shot signMessage).
- *   2. Resolve the user's vault (auto-registers on first use).
+ *   2. GET /api/jupiter/trigger-v2/vault — auto-registers the vault on first use.
+ *      Jupiter requires the vault to exist before deposit/craft can be called.
  *   3. POST /api/jupiter/trigger-v2/deposit/craft → unsigned VersionedTransaction.
  *   4. Privy signs the deposit tx (regular tx-signing prompt).
  *   5. POST /api/jupiter/trigger-v2/orders/price with the signed deposit +
@@ -203,7 +204,27 @@ export function useJupiterTriggerV2() {
     // Step 1: JWT.
     const jwt = await ensureJwt();
 
-    // Step 2: deposit/craft. This builds the unsigned VersionedTransaction
+    // Step 2: Ensure the vault exists (auto-registers on first use).
+    // Jupiter's deposit/craft endpoint requires a vault to already be registered
+    // for the wallet — if we skip this, craft returns 403 "No vault registered".
+    const vaultRes = await withWaitLogger(
+      {
+        file: 'altair_frontend1/src/lib/useJupiterTriggerV2.ts',
+        target: '/api/jupiter/trigger-v2/vault',
+        description: 'V2 get/register vault',
+      },
+      () =>
+        fetch('/api/jupiter/trigger-v2/vault', {
+          method: 'GET',
+          headers: { Authorization: `Bearer ${jwt}` },
+        })
+    );
+    if (!vaultRes.ok) {
+      const errBody = (await vaultRes.json().catch(() => ({}))) as { error?: string };
+      throw new Error(errBody?.error ?? 'Jupiter Trigger V2 vault registration failed.');
+    }
+
+    // Step 3: deposit/craft. This builds the unsigned VersionedTransaction
     // that moves `amountInRaw` of sellToken from the user's wallet into the
     // Privy-managed vault.
     const craftRes = await withWaitLogger(
@@ -242,7 +263,7 @@ export function useJupiterTriggerV2() {
       throw new Error('Trigger V2 deposit/craft returned an incomplete response.');
     }
 
-    // Step 3: have Privy sign the unsigned deposit transaction. Privy's
+    // Step 4: have Privy sign the unsigned deposit transaction. Privy's
     // `signTransaction` takes a serialized Uint8Array and returns one. We just
     // need to round-trip the bytes — we don't need to inspect the VersionedTx
     // structure ourselves.
@@ -263,7 +284,7 @@ export function useJupiterTriggerV2() {
     );
     const depositSignedTx = Buffer.from(signedTransaction).toString('base64');
 
-    // Step 4: orders/price with the signed deposit. This is what actually
+    // Step 5: orders/price with the signed deposit. This is what actually
     // submits the deposit on-chain AND registers the limit order with Jupiter.
     const orderRes = await withWaitLogger(
       {
@@ -314,7 +335,7 @@ export function useJupiterTriggerV2() {
       timestamp: Date.now(),
     });
 
-    // Step 5: writeback to /api/limit-orders with V2 fields.
+    // Step 6: writeback to /api/limit-orders with V2 fields.
     let LOID: string | null = null;
     try {
       const writebackRes = await fetch('/api/limit-orders', {
