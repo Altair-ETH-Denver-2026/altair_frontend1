@@ -86,6 +86,81 @@ export default function Chat() {
     }
     return executeLimitOrderV2(intent, opts);
   };
+
+  /**
+   * Checks the user's Solana wallet for enough of `tokenSymbol` to fill
+   * `requiredAmount` (human-readable, e.g. "0.5").
+   * Returns null when the balance is sufficient, or a friendly message string
+   * describing the shortfall and suggesting a swap.
+   */
+  const checkSolanaTokenBalance = async (
+    tokenSymbol: string,
+    requiredAmount: string
+  ): Promise<string | null> => {
+    const required = parseFloat(requiredAmount);
+    if (!Number.isFinite(required) || required <= 0) return null;
+
+    const solanaAddress = solanaWallets?.[0]?.address;
+    if (!solanaAddress) return null;
+
+    try {
+      const accessToken = await getAccessToken();
+      const res = await fetch('/api/balances', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          chain: 'SOLANA_MAINNET',
+          walletAddress: solanaAddress,
+          forceRefresh: true,
+          ...(accessToken ? { accessToken } : {}),
+        }),
+      });
+      if (!res.ok) return null;
+      const data = (await res.json()) as { tokens?: Record<string, { balance?: string; symbol?: string }> };
+      const tokens = data?.tokens ?? {};
+
+      // Look up by exact symbol (case-insensitive).
+      const sym = tokenSymbol.toUpperCase();
+      const entry = Object.values(tokens).find((t) => (t.symbol ?? '').toUpperCase() === sym);
+      const balance = parseFloat(entry?.balance ?? '0');
+      if (!Number.isFinite(balance)) return null;
+
+      if (balance < required) {
+        const shortfall = (required - balance).toFixed(6).replace(/\.?0+$/, '');
+        const haveStr = balance.toFixed(6).replace(/\.?0+$/, '');
+        return (
+          `You don't have enough ${sym} to place this order. ` +
+          `You have ${haveStr} ${sym} but need ${required} ${sym} ` +
+          `— a shortfall of ${shortfall} ${sym}. ` +
+          `Would you like to swap another token for the extra ${sym} first?`
+        );
+      }
+    } catch {
+      // Best-effort — don't block execution on a balance check failure.
+    }
+    return null;
+  };
+
+  /** Maps known Jupiter / upstream error strings to friendly messages. */
+  const friendlyLimitOrderError = (raw: string): string => {
+    if (/at least \d+ USD/i.test(raw)) {
+      const match = raw.match(/at least (\d+) USD/i);
+      const min = match?.[1] ?? '10';
+      return (
+        `This order is too small — Jupiter requires a minimum order value of $${min} USD. ` +
+        `Try increasing your order size so the total value exceeds $${min}.`
+      );
+    }
+    if (/insufficient.*funds?|not enough.*balance/i.test(raw)) {
+      return 'You don\'t have enough funds in your wallet to place this order.';
+    }
+    if (/vault/i.test(raw) && /register/i.test(raw)) {
+      return 'Your trading vault isn\'t set up yet. Please try again — it\'ll be created automatically.';
+    }
+    return raw;
+  };
+
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -783,12 +858,15 @@ export default function Chat() {
 
     try {
       if (button.action.kind === 'RUN_LOCAL') {
+        // For limit orders we delay the "live" confirmation until after the
+        // execution promise resolves, so we don't show success before we know
+        // the order was actually accepted.
         const instantMessage = button.action.actionId === 'CONFIRM_SWAP'
           ? getRandomSwapSubmittedMessage()
           : button.action.actionId === 'CONFIRM_LIMIT_ORDER'
-            ? getRandomLimitOrderSubmittedMessage()
+            ? null
             : button.action.presetAssistantMessage;
-        addInstantAssistantMessage(instantMessage);
+        if (instantMessage) addInstantAssistantMessage(instantMessage);
         if (button.action.actionId === 'CANCEL_SWAP') {
           setPendingIntent(null);
           console.log('[ChatButtonRow] action cancel swap', { rowId: row.id });
@@ -804,18 +882,29 @@ export default function Chat() {
             addInstantAssistantMessage('Limit order intent was lost — please re-issue the order.');
             return;
           }
+          const limitIntent = intent as ChatLimitOrderIntent;
+
+          // Pre-flight: check the user has enough of the sell token.
+          const balanceError = await checkSolanaTokenBalance(limitIntent.sell, limitIntent.amount);
+          if (balanceError) {
+            addInstantAssistantMessage(balanceError);
+            return;
+          }
+
           try {
-            const result = await executeLimitOrder(intent as ChatLimitOrderIntent, {
+            const result = await executeLimitOrder(limitIntent, {
               CID: row.context?.cid ?? null,
             });
+            // Only show success message once execution has confirmed.
+            const submitted = getRandomLimitOrderSubmittedMessage();
             const tail = result.kind === 'time'
-              ? `Scheduled for ${intent.runAt ?? 'the requested time'}.`
-              : `Trigger at ${intent.targetPrice} ${(intent.quoteCurrency ?? 'USDC').toUpperCase()}/${intent.sell.toUpperCase()}.`;
+              ? `Scheduled for ${limitIntent.runAt ?? 'the requested time'}.`
+              : `Trigger at ${limitIntent.targetPrice} ${(limitIntent.quoteCurrency ?? 'USDC').toUpperCase()}/${limitIntent.sell.toUpperCase()}.`;
             const txTail = result.txHash ? ` tx ${result.txHash.slice(0, 8)}…` : '';
-            addInstantAssistantMessage(`${tail}${txTail}`);
+            addInstantAssistantMessage(`${submitted} ${tail}${txTail}`);
           } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            addInstantAssistantMessage(`Limit order failed: ${msg}`);
+            const raw = err instanceof Error ? err.message : String(err);
+            addInstantAssistantMessage(friendlyLimitOrderError(raw));
           }
           return;
         }
