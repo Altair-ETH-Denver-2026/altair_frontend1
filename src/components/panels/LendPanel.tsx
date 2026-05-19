@@ -41,10 +41,24 @@ export default function LendPanel({ width, onClose, CID = null }: LendPanelProps
   const { markets, positions, loading, error, refresh } = useLendPositions({ enabled: true });
 
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
+  const [expandedMarkets, setExpandedMarkets] = useState<Set<string>>(new Set());
   const [depositAmount, setDepositAmount] = useState<string>('');
   const [submittingAction, setSubmittingAction] = useState<null | 'deposit' | 'withdraw'>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionStatus, setActionStatus] = useState<string | null>(null);
+
+  const toggleMarket = (symbol: string) => {
+    setExpandedMarkets((prev) => {
+      const next = new Set(prev);
+      if (next.has(symbol)) {
+        next.delete(symbol);
+        if (selectedSymbol === symbol) setSelectedSymbol(null);
+      } else {
+        next.add(symbol);
+      }
+      return next;
+    });
+  };
 
   // Show only USDC-style stables first to match the v1 scope (Jupiter Lend Earn is currently
   // dominated by USDC/USDT/USDS). We still surface anything Jupiter returns.
@@ -188,46 +202,49 @@ export default function LendPanel({ width, onClose, CID = null }: LendPanelProps
         {sortedMarkets.length === 0 && !loading ? (
           <div className="text-xs text-gray-500 italic py-1">No markets available.</div>
         ) : (
-          <div className="flex flex-col gap-1.5">
+          <div className="flex flex-col gap-1">
             {sortedMarkets.slice(0, 8).map((market) => {
               const symbol = (market.symbol ?? '').toUpperCase();
-              const isSelected = selectedSymbol === symbol;
+              const isExpanded = expandedMarkets.has(symbol);
               return (
                 <div
                   key={market.asset ?? symbol}
-                  className="flex flex-col rounded-md border border-gray-700 bg-gray-800/40 px-2 py-1.5"
+                  className="rounded-md border border-gray-700 bg-gray-800/40 overflow-hidden"
                 >
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <div className="text-sm text-gray-100 font-medium">{symbol || '—'}</div>
-                      <div className="text-[11px] text-gray-400">APY {formatApy(market.apy)}</div>
+                  {/* Header row — click anywhere to expand/collapse */}
+                  <button
+                    type="button"
+                    onClick={() => toggleMarket(symbol)}
+                    className="w-full flex items-center justify-between px-2 py-1.5 cursor-pointer hover:bg-gray-700/40 transition-colors"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-[11px] text-gray-400 transition-transform duration-150" style={{ display: 'inline-block', transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)' }}>▶</span>
+                      <span className="text-sm text-gray-100 font-medium">{symbol || '—'}</span>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedSymbol(isSelected ? null : symbol)}
-                      disabled={!isReady}
-                      className="rounded-md border border-emerald-700 bg-emerald-900/60 px-2 py-1 text-[11px] text-emerald-100 hover:border-emerald-400 hover:bg-emerald-900 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
-                    >
-                      {isSelected ? 'Close' : 'Deposit'}
-                    </button>
-                  </div>
-                  {isSelected ? (
-                    <div className="mt-1 flex items-center gap-1.5">
+                    <span className="text-[11px] text-emerald-400 font-medium tabular-nums">
+                      {market.apy != null ? `${formatApy(market.apy)} APY` : 'APY —'}
+                    </span>
+                  </button>
+
+                  {/* Expanded deposit form */}
+                  {isExpanded ? (
+                    <div className="px-2 pb-2 flex items-center gap-1.5 border-t border-gray-700 pt-1.5">
                       <input
                         type="text"
                         inputMode="decimal"
                         placeholder={`Amount in ${symbol}`}
-                        value={depositAmount}
-                        onChange={(e) => setDepositAmount(e.target.value)}
+                        value={selectedSymbol === symbol ? depositAmount : ''}
+                        onChange={(e) => { setSelectedSymbol(symbol); setDepositAmount(e.target.value); }}
+                        onFocus={() => setSelectedSymbol(symbol)}
                         className="flex-1 rounded-md border border-gray-700 bg-gray-900 px-2 py-1 text-xs text-gray-100 placeholder-gray-500 focus:border-gray-500 focus:outline-none"
                       />
                       <button
                         type="button"
-                        onClick={() => void handleDeposit(market)}
-                        disabled={!isReady || submittingAction !== null || !depositAmount.trim()}
+                        onClick={() => { setSelectedSymbol(symbol); void handleDeposit(market); }}
+                        disabled={!isReady || submittingAction !== null || !(selectedSymbol === symbol && depositAmount.trim())}
                         className="rounded-md border border-emerald-600 bg-emerald-700 px-2 py-1 text-[11px] text-white hover:bg-emerald-600 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
                       >
-                        {submittingAction === 'deposit' ? '…' : 'Submit'}
+                        {submittingAction === 'deposit' && selectedSymbol === symbol ? '…' : 'Deposit'}
                       </button>
                     </div>
                   ) : null}
