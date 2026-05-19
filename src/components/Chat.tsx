@@ -4,7 +4,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { SpinningLogo } from './SpinningLogo';
 import { ShieldCheck, Send, Loader2 } from 'lucide-react';
 import { useLogoAsset } from '../lib/logo';
-import { usePrivy } from '@privy-io/react-auth';
+import { usePrivy, useDelegatedActions } from '@privy-io/react-auth';
 import { useWallets as useSolanaWallets } from '@privy-io/react-auth/solana';
 import { withWaitLogger } from '../lib/waitLogger';
 import { getBackendBaseUrl } from '../lib/backendUrl';
@@ -65,6 +65,7 @@ const isMissingSolanaToken = (symbol: string) => {
 export default function Chat() {
   const { authenticated, getAccessToken } = usePrivy();
   const { wallets: solanaWallets } = useSolanaWallets();
+  const { delegateWallet } = useDelegatedActions();
   const executeSwap = useSwap();
   const executeSolanaSwap = useSolanaSwap();
   const executeRelay = useRelay();
@@ -889,6 +890,30 @@ export default function Chat() {
           if (balanceError) {
             addInstantAssistantMessage(balanceError);
             return;
+          }
+
+          // For time-triggered orders the server needs to sign on the user's
+          // behalf when the scheduled time arrives. Request Privy wallet
+          // delegation now — right before confirming — so the user understands
+          // exactly why the permission is needed. Privy is idempotent: if the
+          // wallet is already delegated this resolves immediately without a
+          // prompt, so repeat orders never re-trigger the UI.
+          if (limitIntent.type === 'LIMIT_ORDER_TIME_INTENT') {
+            const solanaAddress = solanaWallets?.[0]?.address;
+            if (!solanaAddress) {
+              addInstantAssistantMessage('No Solana wallet connected. Please connect your wallet first.');
+              return;
+            }
+            try {
+              await delegateWallet({ address: solanaAddress, chainType: 'solana' });
+            } catch (delegateErr) {
+              const msg = delegateErr instanceof Error ? delegateErr.message : String(delegateErr);
+              // User rejected the delegation prompt — don't schedule the order.
+              addInstantAssistantMessage(
+                `Scheduled orders require a one-time permission so Altair can execute the trade on your behalf when the time arrives. ${msg}`
+              );
+              return;
+            }
           }
 
           try {
