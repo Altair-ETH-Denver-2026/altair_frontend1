@@ -11,10 +11,8 @@ import {
   TransactionInstruction,
   SYSVAR_RENT_PUBKEY,
 } from '@solana/web3.js';
-import { resolveSelectedChain } from './useSwap';
 import { withWaitLogger } from './waitLogger';
 import { SOLANA_MAINNET, resolveRpcUrls } from '../../config/chain_info';
-import type { ChainKey } from '../../config/blockchain_config';
 import * as SolanaTokens from '../../config/token_info/solana_tokens';
 
 type TokenMeta = { address?: string; decimals?: number; symbol?: string };
@@ -113,7 +111,7 @@ const buildTransferCheckedInstruction = (params: {
   });
 };
 
-export function useSolanaTransfer(explicitChain?: ChainKey) {
+export function useSolanaTransfer() {
   const { authenticated } = usePrivy();
   const { wallets, ready } = useWallets();
   const { signAndSendTransaction } = useSignAndSendTransaction();
@@ -121,11 +119,6 @@ export function useSolanaTransfer(explicitChain?: ChainKey) {
   return async (tokenSymbol: string, amount: string, recipient: string): Promise<string> => {
     if (!authenticated || !ready || !wallets?.length) {
       throw new Error('No authenticated Solana wallet available. Connect a Solana wallet in the app.');
-    }
-
-    const selectedChain = resolveSelectedChain(explicitChain);
-    if (selectedChain !== 'SOLANA_MAINNET') {
-      throw new Error('Solana transfers are only available on SOLANA_MAINNET.');
     }
 
     const wallet = wallets[0];

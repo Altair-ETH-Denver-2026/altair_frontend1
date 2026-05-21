@@ -30,6 +30,16 @@ export type SwapInitiatedEventDetail = {
   timestamp: number;
 };
 
+export type SwapConfirmedEventDetail = {
+  sellToken: string;
+  buyToken: string;
+  sellChain: ChainKey;
+  buyChain: ChainKey;
+  amount: string;
+  intentType: 'SINGLE_CHAIN_SWAP_INTENT' | 'CROSS_CHAIN_SWAP_INTENT' | 'BRIDGE_INTENT';
+  timestamp: number;
+};
+
 export type SwapSubmittedEventDetail = {
   sellToken: string;
   buyToken: string;
@@ -85,6 +95,14 @@ export const dispatchSwapInitiated = (detail: SwapInitiatedEventDetail): void =>
   }
 };
 
+export const dispatchSwapConfirmed = (detail: SwapConfirmedEventDetail): void => {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent('altair:swap-confirmed', { detail })
+    );
+  }
+};
+
 export const dispatchSwapSubmitted = (detail: SwapSubmittedEventDetail): void => {
   if (typeof window !== 'undefined') {
     window.dispatchEvent(
@@ -113,6 +131,10 @@ export const isBalanceUpdatedEvent = (event: Event): event is CustomEvent<Balanc
 
 export const isSwapInitiatedEvent = (event: Event): event is CustomEvent<SwapInitiatedEventDetail> => {
   return event.type === 'altair:swap-initiated';
+};
+
+export const isSwapConfirmedEvent = (event: Event): event is CustomEvent<SwapConfirmedEventDetail> => {
+  return event.type === 'altair:swap-confirmed';
 };
 
 export const isSwapSubmittedEvent = (event: Event): event is CustomEvent<SwapSubmittedEventDetail> => {
