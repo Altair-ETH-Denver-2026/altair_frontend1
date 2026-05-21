@@ -78,19 +78,21 @@ export const WALLET_DISPLAY = { // Wallet panel/dropdown sizing and typography c
   buttonActiveBorderColor: '#60a5fa', // Active top-row button border (border-blue-400) in UserMenu.tsx
   buttonSize: 1, // Global wallet size scalar in UserMenu.tsx
   rows: { // Token row vertical padding config used in renderBalances in UserMenu.tsx
-    paddingTop: 6, // Top padding per token row in UserMenu.tsx
-    paddingBottom: 6, // Bottom padding per token row in UserMenu.tsx
+    paddingTop: 5, // Top padding per token row in UserMenu.tsx
+    paddingBottom: 5, // Bottom padding per token row in UserMenu.tsx
   },
   tokenSymbols: { // Token symbol typography in renderBalances in UserMenu.tsx
-    fontSize: 14, // Token symbol font size in UserMenu.tsx
+    fontSize: 13, // Token symbol font size in UserMenu.tsx
     fontName: 'sans-serif', // Token symbol font family in UserMenu.tsx
-    color: '#d1d5db', // Token symbol color in UserMenu.tsx
+    color: '#ffffff', // Token symbol color in UserMenu.tsx
+    lineHeight: 1.2, // Unitless line-height; <1 lets the line box hug the glyph, removing residual leading
+    paddingBottom: 0, // Bottom padding between symbol and the price beneath it in UserMenu.tsx
   },
   tokenBalances: { // Token balance typography and precision in renderBalances in UserMenu.tsx
-    fontSize: 14, // Token balance font size in UserMenu.tsx
+    fontSize: 15, // Token balance font size in UserMenu.tsx
     fontName: 'sans-serif', // Token balance font family in UserMenu.tsx
     color: '#f3f4f6', // Token balance color in UserMenu.tsx
-    decimals: 8, // Token balance decimal precision in UserMenu.tsx
+    decimals: 6, // Token balance decimal precision in UserMenu.tsx
   },
   tokenIcons: { // Token icon config used in renderBalances in UserMenu.tsx
     fileType: 'webp', // Image file extension in UserMenu.tsx
@@ -135,6 +137,7 @@ export const WALLET_DISPLAY = { // Wallet panel/dropdown sizing and typography c
     },
   },
   x: { // Wallet panel close “×” placement and sizing in UserMenu.tsx
+    ENABLED: true,
     paddingTop: 0, // Close top offset in UserMenu.tsx
     paddingRight: 6, // Close right offset in UserMenu.tsx
     size: 23, // Close icon size in UserMenu.tsx
@@ -225,7 +228,22 @@ export const WALLET_DISPLAY = { // Wallet panel/dropdown sizing and typography c
       paddingLeft: 8,
       paddingRight: 8
     }
-  }
+  },
+  tokenPrices: { // USD price shown below each token symbol in renderBalances in UserMenu.tsx
+    fontSize: 11, // Token price font size in UserMenu.tsx
+    fontName: 'sans-serif', // Token price font family in UserMenu.tsx
+    color: '#8f96a0', // Token price color in UserMenu.tsx
+    decimals: 2, // Token price decimal precision in UserMenu.tsx
+    lineHeight: 1, // Unitless line-height; <1 lets the line box hug the glyph, removing residual leading
+    paddingTop: 2, // Top padding between symbol and price in UserMenu.tsx
+  },
+  balanceValues: { // USD value of the user's balance shown to the right of each balance in renderBalances in UserMenu.tsx
+    fontSize: 11, // Balance dollar-value font size in UserMenu.tsx
+    fontName: 'sans-serif', // Balance dollar-value font family in UserMenu.tsx
+    color: '#8f96a0', // Balance dollar-value color in UserMenu.tsx
+    decimals: 2, // Balance dollar-value decimal precision in UserMenu.tsx
+    paddingLeft: 12, // Left padding separating dollar value from balance in UserMenu.tsx
+  },
 };
 
 export const CHAIN_OPTIONS = {
@@ -243,7 +261,11 @@ export const CHAIN_OPTIONS = {
     walletDisplay: { // Refers to the chain dropdown that appears at the top of wallet UIs such as WALLET_PANELs and the WALLET_DROPDOWN
       dropdownLabel: 'Ethereum', // How this chain appears in the dropdown
       selectedLabel: 'Ethereum Wallet', // How this chain appears on the button after being selected
-    }
+    },
+    transactionPanel: {
+      inChat: 'Ethereum',
+      sidePanel: 'Ethereum',
+    },
   },
 
   // Ethereum Sepolia Testnet
@@ -257,7 +279,11 @@ export const CHAIN_OPTIONS = {
     walletDisplay: {
       dropdownLabel: 'Ethereum Testnet',
       selectedLabel: 'Ethereum Testnet',
-    }
+    },
+    transactionPanel: {
+      inChat: 'Ethereum Testnet',
+      sidePanel: 'Ethereum Testnet',
+    },
   },
 
   // Base
@@ -271,7 +297,11 @@ export const CHAIN_OPTIONS = {
     walletDisplay: {
       dropdownLabel: 'Base',
       selectedLabel: 'Base Wallet',
-    }
+    },
+    transactionPanel: {
+      inChat: 'Base',
+      sidePanel: 'Base',
+    },
   },
 
   // Base Sepolia Testnet
@@ -285,7 +315,11 @@ export const CHAIN_OPTIONS = {
     walletDisplay: {
       dropdownLabel: 'Base Testnet',
       selectedLabel: 'Base Testnet',
-    }
+    },
+    transactionPanel: {
+      inChat: 'Base Testnet',
+      sidePanel: 'Base Testnet',
+    },
   },
 
   // Solana
@@ -299,7 +333,11 @@ export const CHAIN_OPTIONS = {
     walletDisplay: {
       dropdownLabel: 'Solana',
       selectedLabel: 'Solana Wallet',
-    }
+    },
+    transactionPanel: {
+      inChat: 'Solana',
+      sidePanel: 'Solana',
+    },
   },
 
   // Solana Devnet
@@ -313,7 +351,11 @@ export const CHAIN_OPTIONS = {
     walletDisplay: {
       dropdownLabel: 'Solana Devnet',
       selectedLabel: 'Solana Devnet',
-    }
+    },
+    transactionPanel: {
+      inChat: 'Solana Devnet',
+      sidePanel: 'Solana Devnet',
+    },
   },
 
   // All Chains
@@ -353,6 +395,7 @@ export const ADD_PANEL_DISPLAY = { // ADD_PANEL sizing, label, and icon styles i
     paddingBottom: 5, // ADD_PANEL icon row bottom padding in UserMenu.tsx
   },
   x: { // ADD_PANEL close “×” placement and sizing in UserMenu.tsx
+    ENABLED: true,
     paddingTop: 0, // Close top offset in UserMenu.tsx
     paddingRight: 6, // Close right offset in UserMenu.tsx
     size: 23, // Close icon size in UserMenu.tsx
@@ -381,6 +424,181 @@ export const ADD_PANEL_DISPLAY = { // ADD_PANEL sizing, label, and icon styles i
     placeholderFontSize: 14,
     spin: true,
   },
+};
+
+export const TRANSACTION_INFO_PANEL_DISPLAY = { // TRANSACTION_INFO_PANEL sizing, typography, and icon styles in UserMenu.tsx
+  displayLocation: {
+    sidePanel: false,
+    inChat: true
+  },
+  sidePanel: {
+    logo: true,
+    width: 270, // Panel width (rectangle wider than tall) in UserMenu.tsx
+    paddingLeft: 23, // Panel content left padding in UserMenu.tsx
+    paddingRight: 23, // Panel content right padding in UserMenu.tsx
+    paddingTop: 5, // Panel content top padding in UserMenu.tsx
+    paddingBottom: 5, // Panel content bottom padding in UserMenu.tsx
+    arrow: { // Center arrow separating sell side from buy side
+      color: '#9ca3af',
+      fontSize: 28,
+      fontName: 'sans-serif',
+    },
+    statusText: { // "Executing"/"Executed" label rendered above the arrow
+      executingLabel: 'Executing...',
+      executedLabel: 'Executed!',
+      fontSize: 12,
+      fontName: 'sans-serif',
+      executingFontStyle: 'italic',
+      executedFontStyle: 'italic',
+      executingColor: '#9ca3af',
+      executedColor: '#9ca3af',
+      paddingBottom: 0,
+    },
+    viewTransaction: { // "View Transaction" link rendered below the arrow after execution
+      label: 'View Transaction',
+      fontSize: 11,
+      fontName: 'sans-serif',
+      color: '#60a5fa',
+      highlightColor: '#93c5fd',
+      paddingTop: 2,
+      underline: true,
+    },
+    leftSection: {
+      alignItems: 'center',
+    },
+    rightSection: {
+      alignItems: 'center',
+    },
+    chainName: { // Chain name shown above each token icon (sourced from CHAIN_OPTIONS[key].transactionPanel.sidePanel)
+      fontSize: 11,
+      fontName: 'monospace',
+      color: '#9ca3af',
+      allCaps: true,
+      letterSpacing: '0.15em',
+      paddingBottom: 4,
+    },
+    tokenSymbol: { // Token symbol shown below the token icon
+      fontSize: 13,
+      fontName: 'sans-serif',
+      color: '#d1d5db',
+      paddingTop: 4,
+    },
+    tokenAmount: { // Token amount shown below the token symbol
+      fontSize: 14,
+      fontName: 'sans-serif',
+      color: '#f3f4f6',
+      decimals: 6,
+      paddingTop: 0,
+    },
+    pendingText: { // Italic "Pending" string shown for the buy amount while the swap is in flight
+      label: 'Pending...',
+      fontStyle: 'italic',
+      color: '#9ca3af',
+    },
+    tokenIcons: {
+      fileType: 'webp',
+      fileSize: '64px',
+      size: 42,
+      borderPosition: 'inner',
+      borderColor: null,
+      borderWidth: null,
+      placeholderColor: '#1F2937',
+      placeholderFontColor: '#d1d5db',
+      placeholderFontSize: 18,
+      spin: true,
+    },
+    x: { // Close "×" placement and sizing
+      ENABLED: true,
+      paddingTop: 0,
+      paddingRight: 6,
+      size: 23,
+      fontName: 'sans-serif',
+    },
+  },
+  inChat: {
+    logo: false,
+    width: 270, // Panel width (rectangle wider than tall) in UserMenu.tsx
+    paddingLeft: 23, // Panel content left padding in UserMenu.tsx
+    paddingRight: 23, // Panel content right padding in UserMenu.tsx
+    paddingTop: 5, // Panel content top padding in UserMenu.tsx
+    paddingBottom: 5, // Panel content bottom padding in UserMenu.tsx
+    arrow: { // Center arrow separating sell side from buy side
+      color: '#9ca3af',
+      fontSize: 28,
+      fontName: 'sans-serif',
+    },
+    statusText: { // "Executing"/"Executed" label rendered above the arrow
+      executingLabel: 'Executing...',
+      executedLabel: 'Executed!',
+      fontSize: 12,
+      fontName: 'sans-serif',
+      executingFontStyle: 'italic',
+      executedFontStyle: 'italic',
+      executingColor: '#9ca3af',
+      executedColor: '#9ca3af',
+      paddingBottom: 0,
+    },
+    viewTransaction: { // "View Transaction" link rendered below the arrow after execution
+      label: 'View Transaction',
+      fontSize: 11,
+      fontName: 'sans-serif',
+      color: '#60a5fa',
+      highlightColor: '#93c5fd',
+      paddingTop: 2,
+      underline: true,
+    },
+    leftSection: {
+      alignItems: 'center',
+    },
+    rightSection: {
+      alignItems: 'center',
+    },
+    chainName: { // Chain name shown above each token icon (sourced from CHAIN_OPTIONS[key].transactionPanel.sidePanel)
+      fontSize: 11,
+      fontName: 'monospace',
+      color: '#9ca3af',
+      allCaps: true,
+      letterSpacing: '0.15em',
+      paddingBottom: 4,
+    },
+    tokenSymbol: { // Token symbol shown below the token icon
+      fontSize: 13,
+      fontName: 'sans-serif',
+      color: '#d1d5db',
+      paddingTop: 4,
+    },
+    tokenAmount: { // Token amount shown below the token symbol
+      fontSize: 14,
+      fontName: 'sans-serif',
+      color: '#f3f4f6',
+      decimals: 6,
+      paddingTop: 0,
+    },
+    pendingText: { // Italic "Pending" string shown for the buy amount while the swap is in flight
+      label: 'Pending...',
+      fontStyle: 'italic',
+      color: '#9ca3af',
+    },
+    tokenIcons: {
+      fileType: 'webp',
+      fileSize: '64px',
+      size: 42,
+      borderPosition: 'inner',
+      borderColor: null,
+      borderWidth: null,
+      placeholderColor: '#1F2937',
+      placeholderFontColor: '#d1d5db',
+      placeholderFontSize: 18,
+      spin: true,
+    },
+    x: { // Close "×" placement and sizing
+      ENABLED: false,
+      paddingTop: 0,
+      paddingRight: 6,
+      size: 23,
+      fontName: 'sans-serif',
+    },
+  }
 };
 
 export const MENU_ICONS = { // Top-right menu icon styling in UserMenu.tsx

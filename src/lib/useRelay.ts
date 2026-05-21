@@ -206,19 +206,37 @@ export const useRelay = () => {
     txHash: string;
     timeoutMs?: number;
     pollMs?: number;
+    confirmations?: number;
   }) => {
-    const { ethereumProvider, txHash, timeoutMs = 180_000, pollMs = 1_250 } = params;
+    const { ethereumProvider, txHash, timeoutMs = 180_000, pollMs = 1_250, confirmations = 2 } = params;
     const startedAt = Date.now();
 
+    console.log('[Relay] Waiting for EVM transaction receipt', {
+      txHash,
+      confirmations,
+      timeoutMs,
+      pollMs,
+    });
+
+    // First, wait for the transaction to be mined
+    let receipt: { status?: string; gasUsed?: string; effectiveGasPrice?: string; gasPrice?: string; blockNumber?: string } | null | undefined;
     while (Date.now() - startedAt < timeoutMs) {
-      const receipt = (await ethereumProvider.request?.({
+      receipt = (await ethereumProvider.request?.({
         method: 'eth_getTransactionReceipt',
         params: [txHash],
-      })) as { status?: string; gasUsed?: string; effectiveGasPrice?: string; gasPrice?: string } | null | undefined;
+      })) as { status?: string; gasUsed?: string; effectiveGasPrice?: string; gasPrice?: string; blockNumber?: string } | null | undefined;
 
       if (receipt) {
         const status = typeof receipt.status === 'string' ? receipt.status.toLowerCase() : null;
-        if (status === '0x1') return receipt;
+        if (status === '0x1') {
+          console.log('[Relay] Transaction mined', {
+            txHash,
+            blockNumber: receipt.blockNumber,
+            gasUsed: receipt.gasUsed,
+            effectiveGasPrice: receipt.effectiveGasPrice,
+          });
+          break;
+        }
         if (status === '0x0') {
           throw new Error(`Relay EVM transaction reverted on-chain: ${txHash}`);
         }
@@ -227,7 +245,61 @@ export const useRelay = () => {
       await new Promise((resolve) => setTimeout(resolve, pollMs));
     }
 
-    throw new Error(`Timed out waiting for Relay EVM transaction confirmation: ${txHash}`);
+    if (!receipt) {
+      throw new Error(`Timed out waiting for Relay EVM transaction confirmation: ${txHash}`);
+    }
+
+    // Wait for additional confirmations to ensure receipt is finalized
+    if (confirmations > 1) {
+      const txBlockNumber = parseHexToBigInt(receipt.blockNumber);
+      if (txBlockNumber !== null) {
+        console.log('[Relay] Waiting for confirmations', {
+          txHash,
+          txBlockNumber: txBlockNumber.toString(),
+          confirmationsNeeded: confirmations,
+        });
+
+        while (Date.now() - startedAt < timeoutMs) {
+          const currentBlockHex = (await ethereumProvider.request?.({
+            method: 'eth_blockNumber',
+            params: [],
+          })) as string | undefined;
+          
+          const currentBlock = parseHexToBigInt(currentBlockHex);
+          if (currentBlock !== null) {
+            const confirmationCount = currentBlock - txBlockNumber + 1n;
+            console.log('[Relay] Confirmation progress', {
+              txHash,
+              currentBlock: currentBlock.toString(),
+              confirmationCount: confirmationCount.toString(),
+              confirmationsNeeded: confirmations,
+            });
+
+            if (confirmationCount >= BigInt(confirmations)) {
+              // Fetch receipt again after confirmations to get final gas values
+              const finalReceipt = (await ethereumProvider.request?.({
+                method: 'eth_getTransactionReceipt',
+                params: [txHash],
+              })) as { status?: string; gasUsed?: string; effectiveGasPrice?: string; gasPrice?: string; blockNumber?: string } | null | undefined;
+
+              if (finalReceipt) {
+                console.log('[Relay] Final receipt after confirmations', {
+                  txHash,
+                  confirmationCount: confirmationCount.toString(),
+                  gasUsed: finalReceipt.gasUsed,
+                  effectiveGasPrice: finalReceipt.effectiveGasPrice,
+                });
+                return finalReceipt;
+              }
+            }
+          }
+
+          await new Promise((resolve) => setTimeout(resolve, pollMs));
+        }
+      }
+    }
+
+    return receipt;
   };
 
   const isRetryableRelayEvmError = (err: unknown) => {
@@ -272,11 +344,52 @@ export const useRelay = () => {
   };
 
   const resolveEvmGasCostFromReceipt = (receipt: { gasUsed?: string; effectiveGasPrice?: string; gasPrice?: string } | null | undefined): bigint | null => {
-    if (!receipt) return null;
+    if (!receipt) {
+      console.warn('[Relay] resolveEvmGasCostFromReceipt: receipt is null/undefined');
+      return null;
+    }
+    
     const gasUsed = parseHexToBigInt(receipt.gasUsed);
-    const gasPrice = parseHexToBigInt(receipt.effectiveGasPrice) ?? parseHexToBigInt(receipt.gasPrice);
-    if (gasUsed === null || gasPrice === null) return null;
-    return gasUsed * gasPrice;
+    const effectiveGasPrice = parseHexToBigInt(receipt.effectiveGasPrice);
+    const gasPrice = parseHexToBigInt(receipt.gasPrice);
+    
+    // Log all gas-related fields from receipt
+    console.log('[Relay] Gas cost calculation from receipt', {
+      gasUsed: receipt.gasUsed,
+      gasUsedBigInt: gasUsed?.toString(),
+      effectiveGasPrice: receipt.effectiveGasPrice,
+      effectiveGasPriceBigInt: effectiveGasPrice?.toString(),
+      gasPrice: receipt.gasPrice,
+      gasPriceBigInt: gasPrice?.toString(),
+    });
+    
+    if (gasUsed === null) {
+      console.warn('[Relay] resolveEvmGasCostFromReceipt: gasUsed is null');
+      return null;
+    }
+    
+    // Prefer effectiveGasPrice (actual price paid) over gasPrice (estimated)
+    const priceToUse = effectiveGasPrice ?? gasPrice;
+    if (priceToUse === null) {
+      console.warn('[Relay] resolveEvmGasCostFromReceipt: both effectiveGasPrice and gasPrice are null');
+      return null;
+    }
+    
+    // Warn if we're using gasPrice instead of effectiveGasPrice
+    if (effectiveGasPrice === null && gasPrice !== null) {
+      console.warn('[Relay] resolveEvmGasCostFromReceipt: effectiveGasPrice not available, using gasPrice (may be inaccurate)');
+    }
+    
+    const gasCost = gasUsed * priceToUse;
+    console.log('[Relay] Computed gas cost', {
+      gasUsed: gasUsed.toString(),
+      priceUsed: priceToUse.toString(),
+      usingEffectivePrice: effectiveGasPrice !== null,
+      gasCostWei: gasCost.toString(),
+      gasCostEth: (Number(gasCost) / 1e18).toFixed(18),
+    });
+    
+    return gasCost;
   };
 
   const waitForSolanaTransactionFeeLamports = async (params: {
@@ -1028,7 +1141,23 @@ export const useRelay = () => {
 
                 const gasCostRaw = resolveEvmGasCostFromReceipt(receipt);
                 if (gasCostRaw !== null && gasCostRaw > 0n) {
+                  const previousTotal = totalRelayGasPaidRaw;
                   totalRelayGasPaidRaw += gasCostRaw;
+                  console.log('[Relay] Gas accumulation for EVM transaction', {
+                    txHash,
+                    stepId: step.id,
+                    gasCostWei: gasCostRaw.toString(),
+                    gasCostEth: (Number(gasCostRaw) / 1e18).toFixed(18),
+                    previousTotalWei: previousTotal.toString(),
+                    newTotalWei: totalRelayGasPaidRaw.toString(),
+                    newTotalEth: (Number(totalRelayGasPaidRaw) / 1e18).toFixed(18),
+                  });
+                } else {
+                  console.warn('[Relay] No gas cost extracted from receipt', {
+                    txHash,
+                    stepId: step.id,
+                    gasCostRaw,
+                  });
                 }
 
                 // Success, stop retrying.
@@ -1125,6 +1254,16 @@ export const useRelay = () => {
     const buyAmountRaw = quotedBuyAmountRaw ?? '';
 
     const gasFeeRaw = totalRelayGasPaidRaw > 0n ? totalRelayGasPaidRaw : 0n;
+    
+    console.log('[Relay] Final gas fee summary', {
+      totalGasWei: gasFeeRaw.toString(),
+      totalGasEth: (Number(gasFeeRaw) / 1e18).toFixed(18),
+      gasSymbol,
+      originChain: intent.sellTokenChain,
+      destinationChain: intent.buyTokenChain,
+      requestId,
+    });
+    
     const sellSymbolNorm = (originToken.symbol ?? intent.sell).trim().toUpperCase();
     const buySymbolNorm = (destinationToken.symbol ?? buySymbol).trim().toUpperCase();
     const gasIsGasSell = sellSymbolNorm === gasSymbol;
@@ -1276,6 +1415,7 @@ export const useRelay = () => {
             chain: intent.sellTokenChain,
             sellToken: sellSymbolNorm,
             buyToken: buySymbolNorm,
+            requestId: requestId ?? undefined,
             balanceUpdates: writebackBalanceUpdates,
           },
         })

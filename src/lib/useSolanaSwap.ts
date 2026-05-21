@@ -304,6 +304,7 @@ export function useSolanaSwap(explicitChain?: ChainKey) {
               chain: 'SOLANA_MAINNET',
               sellToken: sellToken.toUpperCase(),
               buyToken: buyToken.toUpperCase(),
+              txHash,
               balanceUpdates: Array.isArray(writebackPayload?.balanceUpdates)
                 ? writebackPayload.balanceUpdates
                 : [],
