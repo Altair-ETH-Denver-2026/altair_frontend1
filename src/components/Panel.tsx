@@ -3,14 +3,14 @@
 import React, { useState } from 'react';
 import { SpinningLogo } from './SpinningLogo';
 import { useLogoAsset } from '../lib/logo';
-import { ADD_PANEL_DISPLAY, PANEL_DISPLAY, WALLET_DISPLAY } from '../../config/ui_config';
+import { ADD_PANEL_DISPLAY, PANEL_DISPLAY, TRANSACTION_INFO_PANEL_DISPLAY, WALLET_DISPLAY } from '../../config/ui_config';
 
 type PanelProps = {
   width: number | string;
   className?: string;
   style?: React.CSSProperties;
   onClose?: () => void;
-  panelType?: 'wallet' | 'add';
+  panelType?: 'wallet' | 'add' | 'transaction-sidepanel' | 'transaction-inchat';
   closeLabel?: string;
   closeClassName?: string;
   closeStyle?: React.CSSProperties;
@@ -40,7 +40,20 @@ export default function Panel({
     ? Boolean(ADD_PANEL_DISPLAY.logo)
     : panelType === 'wallet'
       ? Boolean(WALLET_DISPLAY.logo)
-      : false;
+      : panelType === 'transaction-sidepanel'
+        ? Boolean((TRANSACTION_INFO_PANEL_DISPLAY as { sidePanel?: { logo?: unknown } }).sidePanel?.logo)
+        : panelType === 'transaction-inchat'
+          ? Boolean((TRANSACTION_INFO_PANEL_DISPLAY as { inChat?: { logo?: unknown } }).inChat?.logo)
+          : false;
+  const isCloseEnabled = panelType === 'add'
+    ? Boolean((ADD_PANEL_DISPLAY.x as { ENABLED?: unknown })?.ENABLED)
+    : panelType === 'wallet'
+      ? Boolean((WALLET_DISPLAY.x as { ENABLED?: unknown })?.ENABLED)
+      : panelType === 'transaction-sidepanel'
+        ? Boolean((TRANSACTION_INFO_PANEL_DISPLAY as { sidePanel?: { x?: { ENABLED?: unknown } } }).sidePanel?.x?.ENABLED)
+        : panelType === 'transaction-inchat'
+          ? Boolean((TRANSACTION_INFO_PANEL_DISPLAY as { inChat?: { x?: { ENABLED?: unknown } } }).inChat?.x?.ENABLED)
+          : true;
 
   return (
     <div
@@ -67,7 +80,7 @@ export default function Panel({
           />
         </div>
       ) : null}
-      {onClose ? (
+      {onClose && isCloseEnabled ? (
         <button
           type="button"
           onClick={onClose}

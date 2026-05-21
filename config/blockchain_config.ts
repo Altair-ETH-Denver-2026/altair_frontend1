@@ -73,11 +73,55 @@ export const BALANCE_RULES = {
   }
 }
 
+export const PRICE_RULES = {
+  fetchAllConditions: {
+    periodically: 5, // Measured in minutes. Asynchronously, periodically, the backend pulls all token prices based on the value of PRICE_RULES.fetchAllConditions.periodically
+    // login: false, not yet active
+    refresh: true, // Runs when the page is opened or refreshed
+    // openWallet: false, not yet active
+    // changeChain: false, not yet active
+    // swapComplete: false, not yet active
+    // swapStart: false, not yet active
+  }
+}
+
 export const DEFAULT_TOKENS = { // These are added when a user creates their account
-  ETH_MAINNET: ['ETH', 'WETH', 'WSOL', 'USDC', 'DAI'],
-  ETH_SEPOLIA: ['ETH', 'WETH', 'WSOL', 'USDC', 'DAI'],
-  BASE_MAINNET: ['ETH', 'WETH', 'WSOL', 'USDC', 'DAI'],
-  BASE_SEPOLIA: ['ETH', 'WETH', 'WSOL', 'USDC', 'DAI'],
-  SOLANA_MAINNET: ['SOL', 'WETH', 'WBTC', 'USDC', 'USDu'],
-  SOLANA_DEVNET: ['SOL', 'WETH', 'WBTC', 'USDC', 'USDu'],
+  ETH_MAINNET: ['ETH', 'WETH', 'WSOL', 'WBTC', 'USDC', 'DAI'],
+  ETH_SEPOLIA: ['ETH', 'WETH', 'WSOL', 'WBTC', 'USDC', 'DAI'],
+  BASE_MAINNET: ['ETH', 'WETH', 'WSOL', 'WBTC', 'USDC', 'DAI'],
+  BASE_SEPOLIA: ['ETH', 'WETH', 'WSOL', 'WBTC', 'USDC', 'DAI'],
+  SOLANA_MAINNET: ['SOL', 'WSOL', 'WETH', 'WBTC', 'USDC', 'DAI'],
+  SOLANA_DEVNET: ['SOL', 'WSOL', 'WETH', 'WBTC', 'USDC', 'DAI'],
 };
+
+export const SWAP_PROVIDER_OPTIONS = {
+  maxAttemptsPerOption: 2, // If a swap fails, it should try again with the next provider option in its respective list. It should try each option a number of times equal to maxAttemptsPerOption. So, if maxAttemptsPerOption is 3, it will try each option 3 times. A value of 0 for maxAttemptsPerOption is treated as infinity, and a swap will keep looping through the options indefinitely.
+  ETH_MAINNET: [
+    '0x v2',
+    '0x v1',
+  ],
+  ETH_SEPOLIA: [
+    '0x v2',
+    '0x v1',
+  ],
+  BASE_MAINNET: [
+    '0x v2',
+    '0x v1',
+  ],
+  BASE_SEPOLIA: [
+    '0x v2',
+    '0x v1',
+  ],
+  SOLANA_MAINNET: [
+    'Jupiter Ultra',
+  ],
+  SOLANA_DEVNET: [
+    'Jupiter Ultra',
+  ],
+  CROSS_CHAIN_SWAP: [
+    'Relay',
+  ],
+  BRIDGE: [
+    'Relay',
+  ]
+}
