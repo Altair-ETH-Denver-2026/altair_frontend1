@@ -44,6 +44,42 @@ Wallet/network icon resolution is convention-based, not metadata-driven: [`resol
 
 Affiliate links are centralized in [`config/external_links.ts`](../../config/external_links.ts) and consumed by [`WALLET_DISPLAY.getCrypto`](../../config/ui_config.ts:170).
 
+## `site_metadata.ts`
+
+Site-wide metadata, SEO, social-card, and PWA settings live in [`config/site_metadata.ts`](../../config/site_metadata.ts). All literal strings, URLs, colors, and icon paths used by Next.js's metadata, viewport, robots, sitemap, and manifest exports are defined here.
+
+### Sections
+
+- **Core site info**: [`SITE_URL`](../../config/site_metadata.ts:8), [`SITE_NAME`](../../config/site_metadata.ts:11), [`SITE_TITLE`](../../config/site_metadata.ts:14), [`SITE_TITLE_TEMPLATE`](../../config/site_metadata.ts:18), [`SITE_DESCRIPTION`](../../config/site_metadata.ts:22), [`SITE_KEYWORDS`](../../config/site_metadata.ts:26), [`SITE_LOCALE`](../../config/site_metadata.ts:62).
+- **Open Graph / Twitter card**: [`SITE_OG_IMAGE`](../../config/site_metadata.ts:52), [`SITE_OG_IMAGE_WIDTH`](../../config/site_metadata.ts:53), [`SITE_OG_IMAGE_HEIGHT`](../../config/site_metadata.ts:54), [`SITE_OG_IMAGE_ALT`](../../config/site_metadata.ts:55), [`SITE_TWITTER_HANDLE`](../../config/site_metadata.ts:59).
+- **Viewport / theming**: [`SITE_THEME_COLOR`](../../config/site_metadata.ts), [`SITE_COLOR_SCHEME`](../../config/site_metadata.ts), [`SITE_VIEWPORT_WIDTH`](../../config/site_metadata.ts), [`SITE_VIEWPORT_INITIAL_SCALE`](../../config/site_metadata.ts).
+- **Robots**: [`SITE_ROBOTS_RULES`](../../config/site_metadata.ts) — array of `{ userAgent, allow, disallow }` rules.
+- **Sitemap**: [`SITE_SITEMAP_ROUTES`](../../config/site_metadata.ts) — array of `{ url, changeFrequency, priority }`. **Per Rule #5, update this array whenever a new public route is added.**
+- **PWA manifest**: [`SITE_PWA_SHORT_NAME`](../../config/site_metadata.ts), [`SITE_PWA_BACKGROUND_COLOR`](../../config/site_metadata.ts), [`SITE_PWA_DISPLAY`](../../config/site_metadata.ts), [`SITE_PWA_START_URL`](../../config/site_metadata.ts), [`SITE_PWA_ICONS`](../../config/site_metadata.ts).
+- **Status pages**: [`NOT_FOUND_TITLE`](../../config/site_metadata.ts), [`NOT_FOUND_MESSAGE`](../../config/site_metadata.ts), [`NOT_FOUND_CTA_LABEL`](../../config/site_metadata.ts), [`ERROR_TITLE`](../../config/site_metadata.ts), [`ERROR_MESSAGE`](../../config/site_metadata.ts), [`ERROR_RETRY_LABEL`](../../config/site_metadata.ts), [`ERROR_HOME_LABEL`](../../config/site_metadata.ts), [`ERROR_SHOW_DETAILS_IN_DEV`](../../config/site_metadata.ts), [`LOADING_LABEL`](../../config/site_metadata.ts).
+
+### Consumers
+
+| Constant group | Consumer file | Effect |
+|---|---|---|
+| Core info, OG, Twitter | [`src/app/layout.tsx`](../../src/app/layout.tsx) (`metadata` export) | `<title>`, `<meta description>`, OG tags, Twitter card |
+| Viewport / theming | [`src/app/layout.tsx`](../../src/app/layout.tsx) (`viewport` export) | viewport meta tag, mobile browser chrome color, color scheme |
+| Robots | [`src/app/robots.ts`](../../src/app/robots.ts) | `/robots.txt` |
+| Sitemap | [`src/app/sitemap.ts`](../../src/app/sitemap.ts) | `/sitemap.xml` |
+| PWA manifest | [`src/app/manifest.ts`](../../src/app/manifest.ts) | `/manifest.webmanifest` |
+| Status pages | [`src/app/not-found.tsx`](../../src/app/not-found.tsx), [`src/app/error.tsx`](../../src/app/error.tsx), [`src/app/loading.tsx`](../../src/app/loading.tsx) | 404 page, error boundary, route-transition spinner |
+
+### Icon / image asset locations
+
+- **Tab favicon**: [`src/app/icon.png`](../../src/app/icon.png) — auto-served as the browser-tab favicon at every requested size (recommend 512×512 source).
+- **iOS home-screen icon**: [`src/app/apple-icon.png`](../../src/app/apple-icon.png) — used when users "Add to Home Screen" on iOS. iOS ignores the PWA manifest's icons array.
+- **Social card**: [`src/app/opengraph-image.png`](../../src/app/opengraph-image.png) — used as the OG/Twitter preview when [`SITE_OG_IMAGE`](../../config/site_metadata.ts:52) is unset, or alongside it. Recommend 1200×630.
+- **PWA install icons** (Android Chrome): paths declared in [`SITE_PWA_ICONS`](../../config/site_metadata.ts), files belong in `public/icons/` (e.g. `public/icons/icon-192.png`, `public/icons/icon-512.png`, `public/icons/icon-maskable-512.png`).
+
+### Analytics
+
+[`src/app/layout.tsx`](../../src/app/layout.tsx) renders both `<SpeedInsights />` (from `@vercel/speed-insights`) and `<Analytics />` (from `@vercel/analytics`). Both require the corresponding tab in the Vercel dashboard to be toggled on per-project; no config or env vars needed. View at `vercel.com/[org]/altair-frontend/{analytics,speed-insights}`.
+
 ## Frontend host -> backend host routing
 
 Server-side API proxy routing is host-based (not dev-vs-start mode based) in [`next.config.ts`](../../next.config.ts:75):
@@ -82,3 +118,4 @@ Wallet/menu icon preloading is implemented in [`UserMenu.tsx`](../../src/compone
 - Token metadata from [`config/token_info`](../../config/token_info)
 - UI behavior from [`config/ui_config.ts`](../../config/ui_config.ts)
 - External URLs from [`config/external_links.ts`](../../config/external_links.ts)
+- Site metadata / SEO / PWA from [`config/site_metadata.ts`](../../config/site_metadata.ts)
