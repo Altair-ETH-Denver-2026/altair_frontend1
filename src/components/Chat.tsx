@@ -260,7 +260,7 @@ export default function Chat() {
                 description: 'Solana sell token mint lookup',
               },
               () =>
-                fetch('/api/token-mint', {
+                fetch(`${getBackendBaseUrl()}/api/token-mint`, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ q: sell }),
@@ -275,7 +275,7 @@ export default function Chat() {
                 description: 'Solana buy token mint lookup',
               },
               () =>
-                fetch('/api/token-mint', {
+                fetch(`${getBackendBaseUrl()}/api/token-mint`, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ q: buy }),
@@ -1004,7 +1004,7 @@ export default function Chat() {
         description: 'chat response',
       },
       () =>
-        fetch('/api/chat', {
+        fetch(`${backendUrl}/api/chat`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
