@@ -11,6 +11,7 @@ import { useSolanaTransfer } from '../lib/useSolanaTransfer';
 import { withWaitLogger } from '../lib/waitLogger';
 import { usePanels } from '../lib/usePanels';
 import { getCachedPrivyAccessToken } from '../lib/privyTokenCache';
+import { getBackendBaseUrl } from '../lib/backendUrl';
 import { PublicKey } from '@solana/web3.js';
 import { UserRound, LogOut, Settings, Wallet, Wrench, Copy, Globe2, Check } from 'lucide-react';
 import WalletPanel from './panels/WalletPanel';
@@ -951,7 +952,7 @@ export default function UserMenu() {
           description: 'wallet balance response',
         },
         () =>
-          fetch('/api/balances', {
+          fetch(`${getBackendBaseUrl()}/api/balances`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
