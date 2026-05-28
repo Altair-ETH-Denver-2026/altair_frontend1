@@ -206,6 +206,6 @@ export const SYSTEM_PROMPT = {
 
 export const CHAT_SUMMARY_LATEST = {
   chatQuantity: 20, // number of recent chat turns summarized for AI context in Altair
-  source: 'MongoDB' as '0G' | 'MongoDB', // default summary storage source used by the assistant pipeline
+  source: 'MongoDB', // default summary storage source used by the assistant pipeline
   sourceOptions: ['0G', 'MongoDB'] as const, // supported summary storage backends for AI memory
 };
