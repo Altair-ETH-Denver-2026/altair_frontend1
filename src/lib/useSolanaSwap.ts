@@ -1,12 +1,15 @@
 'use client';
 
-import { PublicKey, VersionedTransaction } from '@solana/web3.js';
+import { Connection, PublicKey, VersionedTransaction } from '@solana/web3.js';
 import bs58 from 'bs58';
 import { withWaitLogger } from './waitLogger';
 import { usePrivy } from '@privy-io/react-auth';
 import { useWallets, useSignAndSendTransaction } from '@privy-io/react-auth/solana';
-import { resolveSelectedChain } from './useSwap';
+import { readCachedTokenSnapshot, resolveSelectedChain } from './useSwap';
+import { dispatchSwapSubmitted, dispatchBalanceStale } from './eventTypes';
+import { getBackendBaseUrl } from './backendUrl';
 import type { ChainKey } from '../../config/blockchain_config';
+import { GAS_TOKENS } from '../../config/blockchain_config';
 
 /**
  * Hook to execute a swap on Solana mainnet via Jupiter Swap API.
@@ -24,6 +27,44 @@ export function useSolanaSwap(explicitChain?: ChainKey) {
     buyToken: string,
     CID?: string | null
   ): Promise<string> => {
+    const formatUnknownError = (err: unknown) => {
+      if (err instanceof Error) {
+        return `${err.name}: ${err.message}`;
+      }
+      try {
+        return JSON.stringify(err);
+      } catch {
+        return String(err);
+      }
+    };
+
+    const extractSimulationLogsFromError = (err: unknown): string[] => {
+      if (!err || typeof err !== 'object') return [];
+
+      const root = err as {
+        logs?: unknown;
+        data?: unknown;
+        cause?: unknown;
+        simulationLogs?: unknown;
+      };
+
+      const candidates = [
+        root.logs,
+        root.simulationLogs,
+        (root.data as { logs?: unknown } | undefined)?.logs,
+        (root.cause as { logs?: unknown; data?: { logs?: unknown } } | undefined)?.logs,
+        (root.cause as { logs?: unknown; data?: { logs?: unknown } } | undefined)?.data?.logs,
+      ];
+
+      for (const candidate of candidates) {
+        if (Array.isArray(candidate)) {
+          return candidate.map((entry) => String(entry));
+        }
+      }
+
+      return [];
+    };
+
     if (!authenticated || !ready || !wallets?.length) {
       throw new Error('No authenticated Solana wallet available. Connect a Solana wallet in the app.');
     }
@@ -56,7 +97,7 @@ export function useSolanaSwap(explicitChain?: ChainKey) {
         description: 'Solana swap route response',
       },
       () =>
-        fetch('/api/test-swap', {
+        fetch(`${getBackendBaseUrl()}/api/test-swap`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -100,6 +141,10 @@ export function useSolanaSwap(explicitChain?: ChainKey) {
     const txBuffer = Buffer.from(swapTransactionBase64, 'base64');
     const versionedTx = VersionedTransaction.deserialize(txBuffer);
     const rpcUrl = payload?.solana?.rpcUrl;
+    const rpcConnection = new Connection(
+      rpcUrl && rpcUrl.trim().length > 0 ? rpcUrl.trim() : 'https://api.mainnet-beta.solana.com',
+      'confirmed'
+    );
     const refreshBlockhash = async () => {
       if (!rpcUrl) return;
       try {
@@ -128,6 +173,27 @@ export function useSolanaSwap(explicitChain?: ChainKey) {
     await refreshBlockhash();
     let serialized = versionedTx.serialize();
 
+    // Preflight simulation before signing so we can surface actionable logs to the UI.
+    const preflight = await withWaitLogger(
+      {
+        file: 'altair_frontend1/src/lib/useSolanaSwap.ts',
+        target: 'Solana simulateTransaction',
+        description: 'Solana swap preflight simulation',
+      },
+      () => rpcConnection.simulateTransaction(versionedTx, { sigVerify: false, replaceRecentBlockhash: true })
+    );
+
+    if (preflight?.value?.err) {
+      const simErr = preflight.value.err;
+      const simLogs = preflight.value.logs ?? [];
+      console.error('[Solana Swap] preflight simulation failed', {
+        err: simErr,
+        logs: simLogs,
+      });
+      const joinedLogs = simLogs.length > 0 ? `\nSimulation logs:\n${simLogs.join('\n')}` : '';
+      throw new Error(`Solana swap preflight failed: ${JSON.stringify(simErr)}${joinedLogs}`);
+    }
+
     try {
       const { signature } = await withWaitLogger(
         {
@@ -143,31 +209,107 @@ export function useSolanaSwap(explicitChain?: ChainKey) {
           })
       );
       const txHash = typeof signature === 'string' ? signature : bs58.encode(signature);
-
-      void fetch('/api/test-swap', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-        },
-        credentials: 'include',
-        body: JSON.stringify({
-          chain: 'SOLANA_MAINNET',
-          sellToken: sellToken.toUpperCase(),
-          buyToken: buyToken.toUpperCase(),
-          amount: sellAmount,
-          recipient,
-          CID: CID ?? null,
-          txHash,
-        }),
-      }).catch((err) => {
-        console.warn('[Solana Swap] swap writeback failed', err);
+      
+      // Dispatch swap-submitted event
+      const sellTokenUpper = sellToken.toUpperCase();
+      const buyTokenUpper = buyToken.toUpperCase();
+      const gasSymbol = (GAS_TOKENS.SOLANA_MAINNET ?? 'SOL').toUpperCase();
+      dispatchSwapSubmitted({
+        sellToken: sellTokenUpper,
+        buyToken: buyTokenUpper,
+        sellChain: 'SOLANA_MAINNET',
+        buyChain: 'SOLANA_MAINNET',
+        amount: sellAmount,
+        txHash,
+        timestamp: Date.now(),
       });
+
+      // Mark involved tokens as stale due to swap initiation
+      const now = Date.now();
+      const tokensToMarkStale = new Set([sellTokenUpper, buyTokenUpper, gasSymbol]);
+      tokensToMarkStale.forEach((symbol) => {
+        if (symbol) {
+          dispatchBalanceStale({
+            chainKey: 'SOLANA_MAINNET',
+            symbol,
+            reason: 'swap',
+            timestamp: now,
+          });
+        }
+      });
+
+      const sellSnapshot = readCachedTokenSnapshot({
+        chainKey: 'SOLANA_MAINNET',
+        walletAddress: recipient,
+        symbol: sellTokenUpper,
+      });
+      const buySnapshot = readCachedTokenSnapshot({
+        chainKey: 'SOLANA_MAINNET',
+        walletAddress: recipient,
+        symbol: buyTokenUpper,
+      });
+      const gasSnapshot = readCachedTokenSnapshot({
+        chainKey: 'SOLANA_MAINNET',
+        walletAddress: recipient,
+        symbol: gasSymbol,
+      });
+
+      const writebackRes = await withWaitLogger(
+        {
+          file: 'altair_frontend1/src/lib/useSolanaSwap.ts',
+          target: '/api/test-swap writeback',
+          description: 'Solana swap writeback after confirmation',
+        },
+        () =>
+          fetch(`${getBackendBaseUrl()}/api/test-swap`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+            },
+            credentials: 'include',
+            body: JSON.stringify({
+              chain: 'SOLANA_MAINNET',
+              sellToken: sellToken.toUpperCase(),
+              buyToken: buyToken.toUpperCase(),
+              amount: sellAmount,
+              recipient,
+              CID: CID ?? null,
+              txHash,
+              balanceSnapshots: {
+                sellTokenBeforeRaw: sellSnapshot.raw,
+                buyTokenBeforeRaw: buySnapshot.raw,
+                gasTokenBeforeRaw: gasSnapshot.raw,
+                gasTokenSymbol: gasSymbol,
+                gasTokenDecimals: gasSnapshot.decimals,
+              },
+            }),
+          })
+      );
+      const writebackPayload = await writebackRes.json().catch(() => ({} as {
+        error?: string;
+        balanceUpdates?: Array<{ chain: ChainKey; symbol: string; balanceAfterRaw: string | null; decimals: number }>;
+      }));
+      if (!writebackRes.ok) {
+        throw new Error(
+          typeof writebackPayload?.error === 'string'
+            ? writebackPayload.error
+            : 'Solana swap writeback failed'
+        );
+      }
 
       if (typeof window !== 'undefined') {
         window.dispatchEvent(
           new CustomEvent('altair:swap-complete', {
-            detail: { chain: 'SOLANA_MAINNET', sellToken: sellToken.toUpperCase(), buyToken: buyToken.toUpperCase() },
+            detail: {
+              chain: 'SOLANA_MAINNET',
+              sellToken: sellToken.toUpperCase(),
+              buyToken: buyToken.toUpperCase(),
+              txHash,
+              balanceUpdates: Array.isArray(writebackPayload?.balanceUpdates)
+                ? writebackPayload.balanceUpdates
+                : [],
+            },
           })
         );
       }
@@ -175,6 +317,17 @@ export function useSolanaSwap(explicitChain?: ChainKey) {
       return txHash;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+      const errorLogs = extractSimulationLogsFromError(err);
+      console.error('[Solana Swap] signAndSendTransaction failed', {
+        message: msg,
+        error: formatUnknownError(err),
+        logs: errorLogs,
+      });
+
+      if (errorLogs.length > 0) {
+        throw new Error(`${msg}\nSimulation logs:\n${errorLogs.join('\n')}`);
+      }
+
       if (msg.includes('403') || msg.includes('HTTP error (403)')) {
         throw new Error(
           'Solana RPC returned 403 (rate limit). Use a custom RPC: set NEXT_PUBLIC_SOLANA_RPC_URL in .env to a free RPC (e.g. Helius: https://www.helius.dev, QuickNode, Alchemy) and restart the dev server.'

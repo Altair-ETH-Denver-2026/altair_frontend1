@@ -20,6 +20,7 @@
     "@solana/web3.js": "^1.98.0",
     "@uniswap/sdk-core": "^7.10.1",
     "@uniswap/smart-order-router": "^4.31.10",
+    "@vercel/analytics": "^2.0.1",
     "@vercel/speed-insights": "^1.3.1",
     "bs58": "^5.0.0",
     "ethers": "^6.16.0",
@@ -42,5 +43,7 @@
   },
   "packageManager": "yarn@1.22.22+sha512.a6b2f7906b721bba3d67d4aff083df04dad64c399707841b7acf00f6b133b7ac24255f2652fa22ae3534329dc6180534e98d17432037ff6fd140556e2bb3137e",
   "main": "index.js",
-  "license": "MIT"
+  "license": "MIT",
+  "repository": "https://github.com/Altair-ETH-Denver-2026/altair_frontend1",
+  "author": "EvanGottschalk <magnus5557@gmail.com>"
 }

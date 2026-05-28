@@ -9,6 +9,7 @@ type SpinningLogoProps = Omit<ImageProps, 'style'> & {
 };
 
 export function SpinningLogo({ className, ...rest }: SpinningLogoProps) {
+  const { onMouseEnter, onTouchStart, ...imageProps } = rest;
   const [spinConfig, setSpinConfig] = useState<{ name: string; duration: string; key: number } | null>(null);
 
   const triggerSpin = () => {
@@ -20,10 +21,17 @@ export function SpinningLogo({ className, ...rest }: SpinningLogoProps) {
 
   return (
     <Image
-      {...rest}
+      {...imageProps}
       className={className}
-      onMouseEnter={triggerSpin}
-      key={spinConfig?.key ?? rest.alt ?? 'logo'}
+      onMouseEnter={(event) => {
+        onMouseEnter?.(event);
+        triggerSpin();
+      }}
+      onTouchStart={(event) => {
+        onTouchStart?.(event);
+        triggerSpin();
+      }}
+      key={spinConfig?.key ?? imageProps.alt ?? 'logo'}
       style={
         spinConfig
           ? {

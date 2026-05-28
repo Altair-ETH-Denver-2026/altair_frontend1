@@ -1,9 +1,11 @@
 'use client';
 
 import React from 'react';
+import Image from 'next/image';
 import { Wallet, Check } from 'lucide-react';
 import type { ChainKey } from '../../../config/blockchain_config';
 import Panel from '../Panel';
+import { SpinningLogo } from '../SpinningLogo';
 
 type AddPanelProps = {
   width: number;
@@ -29,6 +31,22 @@ type AddPanelProps = {
   };
   chainDropdownFontSize: number;
   chainDropdownWidth: number;
+  chainDropdownFontName: string;
+  chainDropdownFontColor: string;
+  chainDropdownAllCaps: boolean;
+  chainDropdownLetterSpacing: string;
+  chainDropdownItemColor: string;
+  chainDropdownItemHighlightColor: string;
+  chainDropdownItemHeight: number;
+  chainIconSize: number;
+  chainIconBorderPosition: string;
+  chainIconBorderColor: string | null;
+  chainIconBorderWidth: number | null;
+  chainIconPlaceholderColor: string;
+  chainIconPlaceholderFontColor: string;
+  chainIconPlaceholderFontSize: number;
+  chainIconSpinEnabled: boolean;
+  resolveChainIconSrc: (chainKey: ChainKey | 'ALL') => string | null;
   titlePaddingBottom: number;
   isChainOpen: boolean;
   isIconHovered: boolean;
@@ -61,6 +79,22 @@ export default function AddPanel({
   iconButtons,
   chainDropdownFontSize,
   chainDropdownWidth,
+  chainDropdownFontName,
+  chainDropdownFontColor,
+  chainDropdownAllCaps,
+  chainDropdownLetterSpacing,
+  chainDropdownItemColor,
+  chainDropdownItemHighlightColor,
+  chainDropdownItemHeight,
+  chainIconSize,
+  chainIconBorderPosition,
+  chainIconBorderColor,
+  chainIconBorderWidth,
+  chainIconPlaceholderColor,
+  chainIconPlaceholderFontColor,
+  chainIconPlaceholderFontSize,
+  chainIconSpinEnabled,
+  resolveChainIconSrc,
   titlePaddingBottom,
   isChainOpen,
   isIconHovered,
@@ -73,6 +107,24 @@ export default function AddPanel({
   onClose,
   onSelectChain,
 }: AddPanelProps) {
+  const resolveIconBorderStyle = (
+    borderPosition: string,
+    borderColor: string | null,
+    borderWidth: number | null
+  ): React.CSSProperties => {
+    if (!borderColor || borderWidth === null || borderWidth <= 0) return {};
+    if (borderPosition === 'outer') {
+      return {
+        boxShadow: `0 0 0 ${borderWidth}px ${borderColor}`,
+      };
+    }
+    return {
+      borderStyle: 'solid',
+      borderColor,
+      borderWidth: `${borderWidth}px`,
+    };
+  };
+
   return (
     <Panel
       width={width}
@@ -137,12 +189,13 @@ export default function AddPanel({
         </button>
         {isChainOpen && (
           <div
-            className="absolute left-1/2 top-full z-[120] -translate-x-1/2 rounded-xl border border-gray-500 bg-gray-900 shadow-2xl pointer-events-auto overflow-hidden"
+            className="absolute left-1/2 top-full z-[120] -translate-x-1/2 rounded-xl border border-gray-500 shadow-2xl pointer-events-auto overflow-hidden"
             style={{
               fontSize: `${chainDropdownFontSize}px`,
-              fontFamily: labelFontFamily,
+              fontFamily: chainDropdownFontName,
               marginTop: `${titlePaddingBottom}px`,
               width: `${chainDropdownWidth}px`,
+              backgroundColor: chainDropdownItemColor,
             }}
           >
             {walletChainOptions
@@ -153,22 +206,114 @@ export default function AddPanel({
               })
               .map((option) => {
                 const isSelected = addPanelChain === option.key;
+                const chainIconSrc = resolveChainIconSrc(option.key);
                 return (
                   <button
                     key={option.key}
                     type="button"
                     onClick={() => onSelectChain(option.key)}
-                    className="flex w-full items-center uppercase tracking-[0.3em] text-gray-300 hover:bg-gray-800 transition-colors cursor-pointer"
+                    className="flex w-full items-center transition-colors cursor-pointer"
+                    onMouseEnter={(event) => {
+                      event.currentTarget.style.backgroundColor = chainDropdownItemHighlightColor;
+                    }}
+                    onMouseLeave={(event) => {
+                      event.currentTarget.style.backgroundColor = 'transparent';
+                    }}
                     style={{
                       paddingLeft: `${paddingLeft}px`,
                       paddingRight: `${paddingRight}px`,
-                      paddingTop: '8px',
-                      paddingBottom: '8px',
+                      height: `${chainDropdownItemHeight}px`,
+                      color: chainDropdownFontColor,
+                      textTransform: chainDropdownAllCaps ? 'uppercase' : 'none',
+                      letterSpacing: chainDropdownLetterSpacing,
+                      backgroundColor: 'transparent',
                     }}
                   >
-                    <span className="mr-2 w-4 flex justify-center">
-                      {isSelected ? <Check className="w-4 h-4 text-white" /> : null}
-                    </span>
+                    <div
+                      className="mr-2 relative flex items-center justify-center shrink-0"
+                      style={{
+                        width: `${chainIconSize}px`,
+                        height: `${chainIconSize}px`,
+                        borderRadius: '50%',
+                        backgroundColor: chainIconPlaceholderColor,
+                        ...resolveIconBorderStyle(
+                          chainIconBorderPosition,
+                          chainIconBorderColor,
+                          chainIconBorderWidth
+                        ),
+                        overflow: 'hidden',
+                      }}
+                    >
+                      {chainIconSrc ? (
+                        <>
+                          {chainIconSpinEnabled ? (
+                            <SpinningLogo
+                              src={chainIconSrc}
+                              alt={option.label}
+                              width={chainIconSize}
+                              height={chainIconSize}
+                              className="absolute inset-0 h-full w-full object-contain"
+                              onError={(e) => {
+                                const img = e.currentTarget as HTMLImageElement;
+                                img.style.display = 'none';
+                                const fallback = img.nextSibling as HTMLElement | null;
+                                if (fallback) fallback.style.display = 'flex';
+                              }}
+                            />
+                          ) : (
+                            <Image
+                              src={chainIconSrc}
+                              alt={option.label}
+                              width={chainIconSize}
+                              height={chainIconSize}
+                              className="absolute inset-0 h-full w-full object-contain"
+                              onError={(e) => {
+                                const img = e.currentTarget as HTMLImageElement;
+                                img.style.display = 'none';
+                                const fallback = img.nextSibling as HTMLElement | null;
+                                if (fallback) fallback.style.display = 'flex';
+                              }}
+                            />
+                          )}
+                          <span
+                            style={{
+                              display: 'none',
+                              position: 'absolute',
+                              inset: 0,
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              fontSize: `${chainIconPlaceholderFontSize}px`,
+                              color: chainIconPlaceholderFontColor,
+                              userSelect: 'none',
+                              pointerEvents: 'none',
+                            }}
+                          >
+                            ?
+                          </span>
+                        </>
+                      ) : (
+                        <span
+                          style={{
+                            position: 'absolute',
+                            inset: 0,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: `${chainIconPlaceholderFontSize}px`,
+                            color: chainIconPlaceholderFontColor,
+                            userSelect: 'none',
+                            pointerEvents: 'none',
+                          }}
+                        >
+                          ?
+                        </span>
+                      )}
+                      {isSelected ? (
+                        <span className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                          <Check className="w-4 h-4 text-white" />
+                        </span>
+                      ) : null}
+                    </div>
                     <span className="flex-1 text-left">{option.label}</span>
                   </button>
                 );

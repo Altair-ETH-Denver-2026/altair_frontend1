@@ -1,9 +1,11 @@
 'use client';
 
 import React from 'react';
+import Image from 'next/image';
 import { Copy, Check, ChevronDown } from 'lucide-react';
 import type { ChainKey } from '../../../config/blockchain_config';
 import Panel from '../Panel';
+import { SpinningLogo } from '../SpinningLogo';
 
 type WalletPanelProps = {
   panel: { id: number; chainKey: ChainKey | 'ALL'; isChainOpen: boolean };
@@ -18,8 +20,27 @@ type WalletPanelProps = {
   containerPaddingRight: number;
   titleFontSize: number;
   titleFontFamily: string;
+  titleChainIconSize: number;
+  titleChainIconBorderPosition: string;
+  titleChainIconBorderColor: string | null;
+  titleChainIconBorderWidth: number | null;
+  titleChainIconPlaceholderColor: string;
+  titleChainIconPlaceholderFontColor: string;
+  titleChainIconPlaceholderFontSize: number;
+  titleChainIconSpinEnabled: boolean;
   chainDropdownFontSize: number;
   chainDropdownWidth: number;
+  chainDropdownItemColor: string;
+  chainDropdownItemHighlightColor: string;
+  chainIconSize: number;
+  chainIconBorderPosition: string;
+  chainIconBorderColor: string | null;
+  chainIconBorderWidth: number | null;
+  chainIconPlaceholderColor: string;
+  chainIconPlaceholderFontColor: string;
+  chainIconPlaceholderFontSize: number;
+  chainIconSpinEnabled: boolean;
+  resolveChainIconSrc: (chainKey: ChainKey | 'ALL') => string | null;
   walletChainOptions: ReadonlyArray<{ key: ChainKey | 'ALL'; label: string }>;
   resolveWalletTitle: (chainKey: ChainKey | 'ALL') => string;
   onToggleChainOpen: (panelId: number) => void;
@@ -27,6 +48,12 @@ type WalletPanelProps = {
   buttonHeight: number;
   buttonPaddingX: number;
   buttonFontSize: number;
+  walletAddressButtonFontSize: number;
+  walletAddressButtonFontFamily: string;
+  walletAddressButtonFontColor: string;
+  walletAddressLabelFontSize: number;
+  walletAddressLabelFontFamily: string;
+  walletAddressLabelFontColor: string;
   topRowButtonColor: string;
   topRowButtonBorderColor: string;
   topRowButtonHighlightColor: string;
@@ -87,6 +114,7 @@ type WalletPanelProps = {
   setIsMaxHovering: (next: boolean) => void;
   onMaxClick: (panelId: number) => void;
   resolveTxUrl: (panelId: number, chainKey: ChainKey | 'ALL') => string;
+  getCryptoLink: string;
   onClose: () => void;
   onSubmitWithdraw: () => void;
   renderBalances: (chainKey: ChainKey | 'ALL') => React.ReactNode;
@@ -105,8 +133,27 @@ export default function WalletPanel({
   containerPaddingRight,
   titleFontSize,
   titleFontFamily,
+  titleChainIconSize,
+  titleChainIconBorderPosition,
+  titleChainIconBorderColor,
+  titleChainIconBorderWidth,
+  titleChainIconPlaceholderColor,
+  titleChainIconPlaceholderFontColor,
+  titleChainIconPlaceholderFontSize,
+  titleChainIconSpinEnabled,
   chainDropdownFontSize,
   chainDropdownWidth,
+  chainDropdownItemColor,
+  chainDropdownItemHighlightColor,
+  chainIconSize,
+  chainIconBorderPosition,
+  chainIconBorderColor,
+  chainIconBorderWidth,
+  chainIconPlaceholderColor,
+  chainIconPlaceholderFontColor,
+  chainIconPlaceholderFontSize,
+  chainIconSpinEnabled,
+  resolveChainIconSrc,
   walletChainOptions,
   resolveWalletTitle,
   onToggleChainOpen,
@@ -114,6 +161,12 @@ export default function WalletPanel({
   buttonHeight,
   buttonPaddingX,
   buttonFontSize,
+  walletAddressButtonFontSize,
+  walletAddressButtonFontFamily,
+  walletAddressButtonFontColor,
+  walletAddressLabelFontSize,
+  walletAddressLabelFontFamily,
+  walletAddressLabelFontColor,
   topRowButtonColor,
   topRowButtonBorderColor,
   topRowButtonHighlightColor,
@@ -174,10 +227,29 @@ export default function WalletPanel({
   setIsMaxHovering,
   onMaxClick,
   resolveTxUrl,
+  getCryptoLink,
   onClose,
   onSubmitWithdraw,
   renderBalances,
 }: WalletPanelProps) {
+  const resolveIconBorderStyle = (
+    borderPosition: string,
+    borderColor: string | null,
+    borderWidth: number | null
+  ): React.CSSProperties => {
+    if (!borderColor || borderWidth === null || borderWidth <= 0) return {};
+    if (borderPosition === 'outer') {
+      return {
+        boxShadow: `0 0 0 ${borderWidth}px ${borderColor}`,
+      };
+    }
+    return {
+      borderStyle: 'solid',
+      borderColor,
+      borderWidth: `${borderWidth}px`,
+    };
+  };
+
   return (
     <Panel
       width={walletWidth}
@@ -206,8 +278,95 @@ export default function WalletPanel({
         <button
           type="button"
           onClick={() => onToggleChainOpen(panel.id)}
-          className="group inline-flex items-center justify-center cursor-pointer pointer-events-auto"
+          className="group inline-flex items-center justify-center gap-2 cursor-pointer pointer-events-auto"
         >
+          <div
+            className="relative flex items-center justify-center shrink-0"
+            style={{
+              width: `${titleChainIconSize}px`,
+              height: `${titleChainIconSize}px`,
+              borderRadius: '50%',
+              backgroundColor: titleChainIconPlaceholderColor,
+              ...resolveIconBorderStyle(
+                titleChainIconBorderPosition,
+                titleChainIconBorderColor,
+                titleChainIconBorderWidth
+              ),
+              overflow: 'hidden',
+            }}
+          >
+            {(() => {
+              const chainIconSrc = resolveChainIconSrc(panel.chainKey);
+              if (!chainIconSrc) {
+                return (
+                  <span
+                    style={{
+                      position: 'absolute',
+                      inset: 0,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: `${titleChainIconPlaceholderFontSize}px`,
+                      color: titleChainIconPlaceholderFontColor,
+                      userSelect: 'none',
+                      pointerEvents: 'none',
+                    }}
+                  >
+                    ?
+                  </span>
+                );
+              }
+
+              return (
+                <>
+                  {titleChainIconSpinEnabled ? (
+                    <SpinningLogo
+                      src={chainIconSrc}
+                      alt={resolveWalletTitle(panel.chainKey)}
+                      width={titleChainIconSize}
+                      height={titleChainIconSize}
+                      className="absolute inset-0 h-full w-full object-contain"
+                      onError={(e) => {
+                        const img = e.currentTarget as HTMLImageElement;
+                        img.style.display = 'none';
+                        const fallback = img.nextSibling as HTMLElement | null;
+                        if (fallback) fallback.style.display = 'flex';
+                      }}
+                    />
+                  ) : (
+                    <Image
+                      src={chainIconSrc}
+                      alt={resolveWalletTitle(panel.chainKey)}
+                      width={titleChainIconSize}
+                      height={titleChainIconSize}
+                      className="absolute inset-0 h-full w-full object-contain"
+                      onError={(e) => {
+                        const img = e.currentTarget as HTMLImageElement;
+                        img.style.display = 'none';
+                        const fallback = img.nextSibling as HTMLElement | null;
+                        if (fallback) fallback.style.display = 'flex';
+                      }}
+                    />
+                  )}
+                  <span
+                    style={{
+                      display: 'none',
+                      position: 'absolute',
+                      inset: 0,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: `${titleChainIconPlaceholderFontSize}px`,
+                      color: titleChainIconPlaceholderFontColor,
+                      userSelect: 'none',
+                      pointerEvents: 'none',
+                    }}
+                  >
+                    ?
+                  </span>
+                </>
+              );
+            })()}
+          </div>
           <span
             className="uppercase tracking-[0.3em] text-gray-400 group-hover:text-gray-200"
             style={{ fontSize: `${titleFontSize}px`, fontFamily: titleFontFamily }}
@@ -217,32 +376,123 @@ export default function WalletPanel({
         </button>
         {panel.isChainOpen && (
           <div
-            className="absolute left-1/2 top-full z-[120] -translate-x-1/2 rounded-xl border border-gray-500 bg-gray-900 shadow-2xl pointer-events-auto overflow-hidden"
+            className="absolute left-1/2 top-full z-[120] -translate-x-1/2 rounded-xl border border-gray-500 shadow-2xl pointer-events-auto overflow-hidden"
             style={{
               fontSize: `${chainDropdownFontSize}px`,
               fontFamily: titleFontFamily,
               marginTop: `${titlePaddingBottom}px`,
               width: `${chainDropdownWidth}px`,
+              backgroundColor: chainDropdownItemColor,
             }}
           >
             {walletChainOptions.filter((option) => option.key !== panel.chainKey).map((option) => {
               const isSelected = panel.chainKey === option.key;
+              const chainIconSrc = resolveChainIconSrc(option.key);
               return (
                 <button
                   key={option.key}
                   type="button"
                   onClick={() => onSelectChain(panel.id, option.key)}
-                  className="flex w-full items-center uppercase tracking-[0.3em] text-gray-300 hover:bg-gray-800 transition-colors cursor-pointer"
+                  className="flex w-full items-center uppercase tracking-[0.3em] text-gray-300 transition-colors cursor-pointer"
+                  onMouseEnter={(event) => {
+                    event.currentTarget.style.backgroundColor = chainDropdownItemHighlightColor;
+                  }}
+                  onMouseLeave={(event) => {
+                    event.currentTarget.style.backgroundColor = 'transparent';
+                  }}
                   style={{
                     paddingLeft: `${containerPaddingLeft}px`,
                     paddingRight: `${containerPaddingRight}px`,
                     paddingTop: '8px',
                     paddingBottom: '8px',
+                    backgroundColor: 'transparent',
                   }}
                 >
-                  <span className="mr-2 w-4 flex justify-center">
-                    {isSelected ? <Check className="w-4 h-4 text-white" /> : null}
-                  </span>
+                  <div
+                    className="mr-2 relative flex items-center justify-center shrink-0"
+                    style={{
+                      width: `${chainIconSize}px`,
+                      height: `${chainIconSize}px`,
+                      borderRadius: '50%',
+                      backgroundColor: chainIconPlaceholderColor,
+                      ...resolveIconBorderStyle(
+                        chainIconBorderPosition,
+                        chainIconBorderColor,
+                        chainIconBorderWidth
+                      ),
+                      overflow: 'hidden',
+                    }}
+                  >
+                    {chainIconSrc ? (
+                      <>
+                        {chainIconSpinEnabled ? (
+                          <SpinningLogo
+                            src={chainIconSrc}
+                            alt={option.label}
+                            width={chainIconSize}
+                            height={chainIconSize}
+                            className="absolute inset-0 h-full w-full object-contain"
+                            onError={(e) => {
+                              const img = e.currentTarget as HTMLImageElement;
+                              img.style.display = 'none';
+                              const fallback = img.nextSibling as HTMLElement | null;
+                              if (fallback) fallback.style.display = 'flex';
+                            }}
+                          />
+                        ) : (
+                          <Image
+                            src={chainIconSrc}
+                            alt={option.label}
+                            width={chainIconSize}
+                            height={chainIconSize}
+                            className="absolute inset-0 h-full w-full object-contain"
+                            onError={(e) => {
+                              const img = e.currentTarget as HTMLImageElement;
+                              img.style.display = 'none';
+                              const fallback = img.nextSibling as HTMLElement | null;
+                              if (fallback) fallback.style.display = 'flex';
+                            }}
+                          />
+                        )}
+                        <span
+                          style={{
+                            display: 'none',
+                            position: 'absolute',
+                            inset: 0,
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: `${chainIconPlaceholderFontSize}px`,
+                            color: chainIconPlaceholderFontColor,
+                            userSelect: 'none',
+                            pointerEvents: 'none',
+                          }}
+                        >
+                          ?
+                        </span>
+                      </>
+                    ) : (
+                      <span
+                        style={{
+                          position: 'absolute',
+                          inset: 0,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: `${chainIconPlaceholderFontSize}px`,
+                          color: chainIconPlaceholderFontColor,
+                          userSelect: 'none',
+                          pointerEvents: 'none',
+                        }}
+                      >
+                        ?
+                      </span>
+                    )}
+                    {isSelected ? (
+                      <span className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                        <Check className="w-4 h-4 text-white" />
+                      </span>
+                    ) : null}
+                  </div>
                   <span className="flex-1 text-left">{option.label}</span>
                 </button>
               );
@@ -379,9 +629,11 @@ export default function WalletPanel({
                   ) : null}
                 </div>
               ) : (
-                <button
-                  type="button"
-                  className="flex items-center justify-center rounded-lg border text-gray-100 transition-colors cursor-pointer"
+                <a
+                  href={getCryptoLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-center rounded-lg border text-gray-100 transition-colors cursor-pointer no-underline"
                   onMouseEnter={(event) => {
                     event.currentTarget.style.backgroundColor = topRowButtonHighlightColor;
                     event.currentTarget.style.borderColor = topRowButtonHighlightBorderColor;
@@ -397,10 +649,11 @@ export default function WalletPanel({
                     fontSize: `${buttonFontSize}px`,
                     backgroundColor: topRowButtonColor,
                     borderColor: topRowButtonBorderColor,
+                    textDecoration: 'none',
                   }}
                 >
                   Get Crypto
-                </button>
+                </a>
               )}
             </>
           );
@@ -619,7 +872,16 @@ export default function WalletPanel({
           paddingRight: `${containerPaddingRight}px`,
         }}
       >
-        <span className="text-sm text-gray-300 whitespace-nowrap">Wallet Address:</span>
+        <span
+          className="whitespace-nowrap"
+          style={{
+            fontSize: `${walletAddressLabelFontSize}px`,
+            fontFamily: walletAddressLabelFontFamily,
+            color: walletAddressLabelFontColor,
+          }}
+        >
+          Wallet Address:
+        </span>
         <button
           type="button"
           onClick={() => {
@@ -651,18 +913,25 @@ export default function WalletPanel({
             }
           }}
           title={resolveWalletAddress(panel.chainKey) || 'Unknown'}
-          className="flex flex-1 min-w-0 items-center justify-center rounded-lg border text-gray-100 leading-none transition-colors cursor-pointer overflow-hidden"
+          className="flex flex-1 min-w-0 items-center justify-center rounded-lg border leading-none transition-colors cursor-pointer overflow-hidden"
           style={{
             height: `${buttonHeight}px`,
             paddingLeft: `${buttonPaddingX / 2}px`,
             paddingRight: `${buttonPaddingX / 2}px`,
-            fontSize: `${buttonFontSize}px`,
+            fontSize: `${walletAddressButtonFontSize}px`,
+            fontFamily: walletAddressButtonFontFamily,
+            color: walletAddressButtonFontColor,
             backgroundColor: resolveWalletCopyActive(`panel-${panel.id}`) ? topRowButtonActiveColor : topRowButtonColor,
             borderColor: resolveWalletCopyActive(`panel-${panel.id}`) ? topRowButtonActiveBorderColor : topRowButtonBorderColor,
           }}
         >
           <span
-            className="flex h-full items-center text-right text-sm leading-none relative top-[1px] truncate"
+            className="flex h-full items-center text-right leading-none relative top-[1px] truncate"
+            style={{
+              fontSize: `${walletAddressButtonFontSize}px`,
+              fontFamily: walletAddressButtonFontFamily,
+              color: walletAddressButtonFontColor,
+            }}
             title={resolveWalletAddress(panel.chainKey) || 'Unknown'}
           >
             {resolveWalletCopyActive(`panel-${panel.id}`)
