@@ -144,3 +144,17 @@ export const USDu = {
   address: '9ckR7pPPvyPadACDTzLwK2ZAEeUJ3qGSnzPs8bVaHrSy',
   decimals: 6,
 };
+
+export const WSOL = {
+  symbol: 'WSOL',
+  name: 'Wrapped SOL',
+  address: 'So11111111111111111111111111111111111111112',
+  decimals: 9,
+};
+
+export const DAI = {
+  symbol: 'DAI',
+  name: 'Wrapped DAI (Wormhole)',
+  address: 'EjmyN6qEC1Tf1JxiG1ae7UTJhUxSwk1TCWNWqxWV4J6o',
+  decimals: 8,
+};
