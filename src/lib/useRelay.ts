@@ -697,7 +697,10 @@ export const useRelay = () => {
         async () => {
           const res = await fetch(`${backendBaseUrl}/api/relay/quote`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+              'Content-Type': 'application/json',
+              ...(cachedToken ? { Authorization: `Bearer ${cachedToken}` } : {}),
+            },
             credentials: 'include',
             body: JSON.stringify(relayRequest),
           });
@@ -819,6 +822,7 @@ export const useRelay = () => {
               buyChain: buyChainKey,
               amount: intent.amount,
               txHash,
+              intentId: cid ?? null,
               timestamp: Date.now(),
             });
             
@@ -1389,7 +1393,10 @@ export const useRelay = () => {
       });
       const writebackRes = await fetch(`${backendBaseUrl}/api/relay/writeback`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(cachedToken ? { Authorization: `Bearer ${cachedToken}` } : {}),
+        },
         credentials: 'include',
         body: JSON.stringify(relayWritebackPayload),
       });
@@ -1416,6 +1423,7 @@ export const useRelay = () => {
             sellToken: sellSymbolNorm,
             buyToken: buySymbolNorm,
             requestId: requestId ?? undefined,
+            intentId: cid ?? null,
             balanceUpdates: writebackBalanceUpdates,
           },
         })

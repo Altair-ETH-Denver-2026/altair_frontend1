@@ -7,6 +7,7 @@ import { BLOCKCHAIN, CHAINS, GAS_TOKENS, SWAP_PROVIDER_OPTIONS, type ChainKey } 
 import { BASE_MAINNET, BASE_SEPOLIA, ETH_MAINNET, ETH_SEPOLIA, resolveRpcUrls } from '@config/chain_info';
 import { dispatchSwapSubmitted, dispatchBalanceStale } from './eventTypes';
 import { getBackendBaseUrl } from './backendUrl';
+import { getCachedPrivyAccessToken } from './privyTokenCache';
 
 const chainConfigs = {
   BASE_SEPOLIA,
@@ -188,6 +189,10 @@ function shouldRetryWithNextProvider(error: unknown): boolean {
     if (message.includes('user rejected')) return false;
     if (message.includes('user denied')) return false;
     if (message.includes('nonce')) return false;
+    // Auth failures must not loop. They also cannot be "fixed" by re-running the
+    // swap, and if the swap already confirmed on-chain a retry would re-submit.
+    if (message.includes('access token')) return false;
+    if (message.includes('unauthorized')) return false;
   }
   
   // Default: retry (conservative approach)
@@ -290,7 +295,7 @@ async function approveTokenIfNeeded(params: {
 }
 
 export const useSwap = (explicitChain?: ChainKey) => {
-  const { authenticated } = usePrivy();
+  const { authenticated, getAccessToken } = usePrivy();
   const { wallets } = useWallets();
 
   return async (sellToken: string, sellAmount: string, buyToken: string, CID?: string | null) =>
@@ -358,6 +363,13 @@ export const useSwap = (explicitChain?: ChainKey) => {
       const buySnapshot = readCachedTokenSnapshot({ chainKey: selectedChain, walletAddress: recipient, symbol: normalizedBuy });
       const gasSnapshot = readCachedTokenSnapshot({ chainKey: selectedChain, walletAddress: recipient, symbol: gasSymbol });
 
+      // Fetch the Privy access token once for the whole swap. We send it as a
+      // Bearer header on both /api/test-swap calls because cross-site cookies do
+      // not reach the prod backend (different registrable domain). On localhost
+      // the cookie still works as a fallback. A token-fetch failure is non-fatal;
+      // the backend will simply 401 the writeback, which Fix 2 now swallows.
+      const accessToken = await getCachedPrivyAccessToken(getAccessToken).catch(() => null);
+
       // Provider retry loop
       const providers = ['0x v2', '0x v1'];
       const maxIterations = SWAP_PROVIDER_OPTIONS.maxAttemptsPerOption || 2;
@@ -379,7 +391,10 @@ export const useSwap = (explicitChain?: ChainKey) => {
               () =>
                 fetch(`${getBackendBaseUrl()}/api/test-swap`, {
                   method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
+                  headers: {
+                    'Content-Type': 'application/json',
+                    ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+                  },
                   credentials: 'include',
                   body: JSON.stringify({
                     chain: selectedChain,
@@ -468,6 +483,7 @@ export const useSwap = (explicitChain?: ChainKey) => {
               buyChain: selectedChain, // same chain for single-chain swap
               amount: sellAmount,
               txHash: tx.hash,
+              intentId: CID ?? null,
               timestamp: Date.now(),
             });
 
@@ -500,65 +516,94 @@ export const useSwap = (explicitChain?: ChainKey) => {
               throw new Error(`Transaction reverted on-chain with ${providerName}`);
             }
 
-            // 6. Success! Do writeback
-            await withWaitLogger(
-              {
-                file: 'altair_frontend1/src/lib/useSwap.ts',
-                target: '/api/test-swap writeback',
-                description: 'swap writeback after confirmation',
-              },
-              async () => {
-                const writebackRes = await fetch(`${getBackendBaseUrl()}/api/test-swap`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  credentials: 'include',
-                  body: JSON.stringify({
-                    chain: selectedChain,
-                    sellToken: effectiveSell,
-                    buyToken: normalizedBuy,
-                    amount: sellAmount,
-                    recipient,
-                    CID: CID ?? null,
-                    txHash: tx.hash,
-                    integratorFee: routePayload.integratorFee ?? null,
-                    balanceSnapshots: {
-                      sellTokenBeforeRaw: sellSnapshot.raw,
-                      buyTokenBeforeRaw: buySnapshot.raw,
-                      gasTokenBeforeRaw: gasSnapshot.raw,
-                      gasTokenSymbol: gasSymbol,
-                      gasTokenDecimals: gasSnapshot.decimals,
+            // 6. Success on-chain. Writeback is bookkeeping only — its failure
+            // must never propagate into the provider retry loop, or we would
+            // re-submit a swap that already confirmed. So we swallow writeback
+            // errors here and still report success to the caller. Balances will
+            // self-heal via the normal post-swap polling.
+            try {
+              await withWaitLogger(
+                {
+                  file: 'altair_frontend1/src/lib/useSwap.ts',
+                  target: '/api/test-swap writeback',
+                  description: 'swap writeback after confirmation',
+                },
+                async () => {
+                  const writebackRes = await fetch(`${getBackendBaseUrl()}/api/test-swap`, {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
                     },
-                  }),
-                });
-                const writebackPayload = await writebackRes.json().catch(() => ({} as {
-                  error?: string;
-                  balanceUpdates?: Array<{ chain: ChainKey; symbol: string; balanceAfterRaw: string | null; decimals: number }>;
-                }));
-                if (!writebackRes.ok) {
-                  throw new Error(
-                    typeof writebackPayload?.error === 'string'
-                      ? writebackPayload.error
-                      : 'Swap writeback failed'
-                  );
-                }
-
-                if (typeof window !== 'undefined') {
-                  window.dispatchEvent(
-                    new CustomEvent('altair:swap-complete', {
-                      detail: {
-                        chain: selectedChain,
-                        sellToken: effectiveSell,
-                        buyToken: normalizedBuy,
-                        txHash: tx.hash,
-                        balanceUpdates: Array.isArray(writebackPayload?.balanceUpdates)
-                          ? writebackPayload.balanceUpdates
-                          : [],
+                    credentials: 'include',
+                    body: JSON.stringify({
+                      chain: selectedChain,
+                      sellToken: effectiveSell,
+                      buyToken: normalizedBuy,
+                      amount: sellAmount,
+                      recipient,
+                      CID: CID ?? null,
+                      txHash: tx.hash,
+                      integratorFee: routePayload.integratorFee ?? null,
+                      balanceSnapshots: {
+                        sellTokenBeforeRaw: sellSnapshot.raw,
+                        buyTokenBeforeRaw: buySnapshot.raw,
+                        gasTokenBeforeRaw: gasSnapshot.raw,
+                        gasTokenSymbol: gasSymbol,
+                        gasTokenDecimals: gasSnapshot.decimals,
                       },
-                    })
-                  );
+                    }),
+                  });
+                  const writebackPayload = await writebackRes.json().catch(() => ({} as {
+                    error?: string;
+                    balanceUpdates?: Array<{ chain: ChainKey; symbol: string; balanceAfterRaw: string | null; decimals: number }>;
+                  }));
+                  if (!writebackRes.ok) {
+                    throw new Error(
+                      typeof writebackPayload?.error === 'string'
+                        ? writebackPayload.error
+                        : 'Swap writeback failed'
+                    );
+                  }
+
+                  if (typeof window !== 'undefined') {
+                    window.dispatchEvent(
+                      new CustomEvent('altair:swap-complete', {
+                        detail: {
+                          chain: selectedChain,
+                          sellToken: effectiveSell,
+                          buyToken: normalizedBuy,
+                          txHash: tx.hash,
+                          intentId: CID ?? null,
+                          balanceUpdates: Array.isArray(writebackPayload?.balanceUpdates)
+                            ? writebackPayload.balanceUpdates
+                            : [],
+                        },
+                      })
+                    );
+                  }
                 }
+              );
+            } catch (writebackErr) {
+              console.error('[useSwap] writeback failed after confirmed swap (non-fatal)', writebackErr);
+              // Still emit swap-complete so the panel transitions out of pending.
+              // Empty balanceUpdates makes the chat handler fall back to its
+              // snapshot-based buy-amount derivation.
+              if (typeof window !== 'undefined') {
+                window.dispatchEvent(
+                  new CustomEvent('altair:swap-complete', {
+                    detail: {
+                      chain: selectedChain,
+                      sellToken: effectiveSell,
+                      buyToken: normalizedBuy,
+                      txHash: tx.hash,
+                      intentId: CID ?? null,
+                      balanceUpdates: [],
+                    },
+                  })
+                );
               }
-            );
+            }
             
             console.log(`[useSwap] Swap succeeded with ${providerName}`);
             return tx.hash as string;

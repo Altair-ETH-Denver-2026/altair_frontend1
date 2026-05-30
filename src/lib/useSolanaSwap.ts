@@ -221,6 +221,7 @@ export function useSolanaSwap(explicitChain?: ChainKey) {
         buyChain: 'SOLANA_MAINNET',
         amount: sellAmount,
         txHash,
+        intentId: CID ?? null,
         timestamp: Date.now(),
       });
 
@@ -306,6 +307,7 @@ export function useSolanaSwap(explicitChain?: ChainKey) {
               sellToken: sellToken.toUpperCase(),
               buyToken: buyToken.toUpperCase(),
               txHash,
+              intentId: CID ?? null,
               balanceUpdates: Array.isArray(writebackPayload?.balanceUpdates)
                 ? writebackPayload.balanceUpdates
                 : [],
