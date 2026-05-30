@@ -1475,6 +1475,7 @@ export default function UserMenu() {
         sellChain?: ChainKey;
         buyChain?: ChainKey;
         amount?: string;
+        intentId?: string | null;
       } | undefined;
       if (!detail) return;
       const sellChain = detail.sellChain;
@@ -1482,11 +1483,27 @@ export default function UserMenu() {
       const sellToken = (detail.sellToken ?? '').toUpperCase();
       const buyToken = (detail.buyToken ?? '').toUpperCase();
       if (!sellChain || !buyChain || !sellToken || !buyToken) return;
+      const intentId = detail.intentId ?? null;
+
+      // Dedupe: if a pending panel for this intent already exists, do nothing.
+      // We peek at state via a no-op setter callback (returning `current`
+      // unchanged makes React bail out without a re-render).
+      if (intentId) {
+        let alreadyExists = false;
+        setTransactionInfoPanelsRef.current((current) => {
+          alreadyExists = current.some(
+            (panel) => panel.status === 'pending' && panel.intentId === intentId
+          );
+          return current;
+        });
+        if (alreadyExists) return;
+      }
 
       const buyTokenSnapshot = balancesByChainRef.current?.[buyChain]?.tokens?.[buyToken];
       const { raw: buyBalanceBeforeRaw, decimals: buyTokenDecimals } = toRawString(buyTokenSnapshot);
 
       addTransactionInfoPanelRef.current({
+        intentId,
         txKey: null,
         txHash: null,
         sellChain,
@@ -1510,6 +1527,7 @@ export default function UserMenu() {
         amount?: string;
         txHash?: string;
         requestId?: string;
+        intentId?: string | null;
       } | undefined;
       if (!detail) return;
       const sellChain = detail.sellChain;
@@ -1518,8 +1536,30 @@ export default function UserMenu() {
       const buyToken = (detail.buyToken ?? '').toUpperCase();
       if (!sellChain || !buyChain || !sellToken || !buyToken) return;
       const txKey = detail.txHash ?? detail.requestId ?? null;
+      const intentId = detail.intentId ?? null;
 
       setTransactionInfoPanelsRef.current((current) => {
+        // Primary match: same intent. A retry for the same swap intent must
+        // update the existing pending panel rather than create a second one,
+        // even if the panel already has a txKey from a prior submission.
+        if (intentId) {
+          for (let i = current.length - 1; i >= 0; i -= 1) {
+            const panel = current[i];
+            if (panel.status !== 'pending') continue;
+            if (panel.intentId !== intentId) continue;
+            const next = current.slice();
+            next[i] = {
+              ...panel,
+              txKey,
+              txHash: detail.txHash ?? null,
+              sellAmount: detail.amount ?? panel.sellAmount,
+            };
+            return next;
+          }
+        }
+
+        // Fallback for legacy events without intentId: original token-pair
+        // matcher, only against panels that haven't been claimed yet.
         for (let i = current.length - 1; i >= 0; i -= 1) {
           const panel = current[i];
           if (panel.status !== 'pending') continue;
@@ -1544,6 +1584,7 @@ export default function UserMenu() {
           ...current,
           {
             id: nextId,
+            intentId,
             txKey,
             txHash: detail.txHash ?? null,
             sellChain,
@@ -1567,6 +1608,7 @@ export default function UserMenu() {
         buyToken?: string;
         txHash?: string;
         requestId?: string;
+        intentId?: string | null;
         balanceUpdates?: Array<{
           chain: ChainKey;
           symbol: string;
@@ -1579,10 +1621,21 @@ export default function UserMenu() {
       const buyToken = (detail.buyToken ?? '').toUpperCase();
       const sellChainFromDetail = detail.chain;
       const txKey = detail.txHash ?? detail.requestId ?? null;
+      const intentId = detail.intentId ?? null;
 
       setTransactionInfoPanelsRef.current((current) => {
         let matchedIndex = -1;
-        if (txKey) {
+        if (intentId) {
+          for (let i = current.length - 1; i >= 0; i -= 1) {
+            const panel = current[i];
+            if (panel.status !== 'pending') continue;
+            if (panel.intentId === intentId) {
+              matchedIndex = i;
+              break;
+            }
+          }
+        }
+        if (matchedIndex === -1 && txKey) {
           for (let i = current.length - 1; i >= 0; i -= 1) {
             const panel = current[i];
             if (panel.status !== 'pending') continue;

@@ -590,6 +590,7 @@ export default function Chat() {
         sellChain?: ChainKey;
         buyChain?: ChainKey;
         amount?: string;
+        intentId?: string | null;
       } | undefined;
       if (!detail?.sellChain || !detail?.buyChain) return;
       const sellChain = detail.sellChain;
@@ -597,34 +598,49 @@ export default function Chat() {
       const sellToken = (detail.sellToken ?? '').toUpperCase();
       const buyToken = (detail.buyToken ?? '').toUpperCase();
       if (!sellToken || !buyToken) return;
+      const intentId = detail.intentId ?? null;
 
-      const snapshotEntry = writeSnapshotIfMissing(sellToken, buyToken, sellChain, buyChain);
-      const nextId = txPanelIdRef.current + 1;
-      txPanelIdRef.current = nextId;
+      setMessages((prev) => {
+        // Dedupe: if a pending panel for this intent already exists, do nothing.
+        // Protects against confirmed firing twice for one click.
+        if (intentId) {
+          for (let i = prev.length - 1; i >= 0; i -= 1) {
+            const panel = prev[i]?.transactionInfoPanel;
+            if (!panel) continue;
+            if (panel.status !== 'pending') continue;
+            if (panel.intentId === intentId) return prev;
+          }
+        }
 
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: 'assistant',
-          content: '',
-          displayContent: '',
-          isTyping: false,
-          transactionInfoPanel: {
-            id: nextId,
-            txKey: null,
-            txHash: null,
-            sellChain,
-            buyChain,
-            sellToken,
-            buyToken,
-            sellAmount: detail.amount ?? '',
-            buyAmount: null,
-            buyBalanceBeforeRaw: snapshotEntry.buyBalanceBeforeRaw,
-            buyTokenDecimals: snapshotEntry.buyTokenDecimals,
-            status: 'pending',
+        const snapshotEntry = writeSnapshotIfMissing(sellToken, buyToken, sellChain, buyChain);
+        const nextId = txPanelIdRef.current + 1;
+        txPanelIdRef.current = nextId;
+
+        return [
+          ...prev,
+          {
+            role: 'assistant',
+            content: '',
+            displayContent: '',
+            isTyping: false,
+            transactionInfoPanel: {
+              id: nextId,
+              intentId,
+              txKey: null,
+              txHash: null,
+              sellChain,
+              buyChain,
+              sellToken,
+              buyToken,
+              sellAmount: detail.amount ?? '',
+              buyAmount: null,
+              buyBalanceBeforeRaw: snapshotEntry.buyBalanceBeforeRaw,
+              buyTokenDecimals: snapshotEntry.buyTokenDecimals,
+              status: 'pending',
+            },
           },
-        },
-      ]);
+        ];
+      });
     };
 
     const handleSwapSubmittedInChat = (event: Event) => {
@@ -636,6 +652,7 @@ export default function Chat() {
         amount?: string;
         txHash?: string;
         requestId?: string;
+        intentId?: string | null;
       } | undefined;
       if (!detail?.sellChain || !detail?.buyChain) return;
       const sellChain = detail.sellChain;
@@ -644,8 +661,35 @@ export default function Chat() {
       const buyToken = (detail.buyToken ?? '').toUpperCase();
       if (!sellToken || !buyToken) return;
       const txKey = detail.txHash ?? detail.requestId ?? null;
+      const intentId = detail.intentId ?? null;
 
       setMessages((prev) => {
+        // Primary match: same intent. A retry for the same swap intent must
+        // update the existing pending panel rather than create a second one,
+        // even if the panel already has a txKey from a prior submission.
+        if (intentId) {
+          for (let i = prev.length - 1; i >= 0; i -= 1) {
+            const message = prev[i];
+            const panel = message.transactionInfoPanel;
+            if (!panel) continue;
+            if (panel.status !== 'pending') continue;
+            if (panel.intentId !== intentId) continue;
+            const next = prev.slice();
+            next[i] = {
+              ...message,
+              transactionInfoPanel: {
+                ...panel,
+                txKey,
+                txHash: detail.txHash ?? null,
+                sellAmount: detail.amount ?? panel.sellAmount,
+              },
+            };
+            return next;
+          }
+        }
+
+        // Fallback for legacy events without intentId: original token-pair
+        // matcher, only against panels that haven't been claimed yet.
         for (let i = prev.length - 1; i >= 0; i -= 1) {
           const message = prev[i];
           const panel = message.transactionInfoPanel;
@@ -680,6 +724,7 @@ export default function Chat() {
             isTyping: false,
             transactionInfoPanel: {
               id: nextId,
+              intentId,
               txKey,
               txHash: detail.txHash ?? null,
               sellChain,
@@ -704,6 +749,7 @@ export default function Chat() {
         buyToken?: string;
         txHash?: string;
         requestId?: string;
+        intentId?: string | null;
         balanceUpdates?: Array<{
           chain: ChainKey;
           symbol: string;
@@ -716,6 +762,7 @@ export default function Chat() {
       const buyToken = (detail.buyToken ?? '').toUpperCase();
       const sellChainFromDetail = detail.chain;
       const txKey = detail.txHash ?? detail.requestId ?? null;
+      const intentId = detail.intentId ?? null;
 
       // Resolve buyAmount synchronously (before setMessages) so executeIntentNow can read it.
       let resolvedBuyAmount: string | null = null;
@@ -740,7 +787,18 @@ export default function Chat() {
 
       setMessages((prev) => {
         let matchedIndex = -1;
-        if (txKey) {
+        if (intentId) {
+          for (let i = prev.length - 1; i >= 0; i -= 1) {
+            const panel = prev[i]?.transactionInfoPanel;
+            if (!panel) continue;
+            if (panel.status !== 'pending') continue;
+            if (panel.intentId === intentId) {
+              matchedIndex = i;
+              break;
+            }
+          }
+        }
+        if (matchedIndex === -1 && txKey) {
           for (let i = prev.length - 1; i >= 0; i -= 1) {
             const panel = prev[i]?.transactionInfoPanel;
             if (!panel) continue;
@@ -1229,6 +1287,7 @@ export default function Chat() {
           if (confirmedMeta) {
             dispatchSwapConfirmed({
               ...confirmedMeta,
+              intentId: row.context?.cid ?? null,
               timestamp: Date.now(),
             });
           }
