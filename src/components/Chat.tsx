@@ -590,6 +590,10 @@ export default function Chat() {
         sellChain?: ChainKey;
         buyChain?: ChainKey;
         amount?: string;
+<<<<<<< HEAD
+=======
+        intentId?: string | null;
+>>>>>>> dev
       } | undefined;
       if (!detail?.sellChain || !detail?.buyChain) return;
       const sellChain = detail.sellChain;
@@ -597,6 +601,7 @@ export default function Chat() {
       const sellToken = (detail.sellToken ?? '').toUpperCase();
       const buyToken = (detail.buyToken ?? '').toUpperCase();
       if (!sellToken || !buyToken) return;
+<<<<<<< HEAD
 
       const snapshotEntry = writeSnapshotIfMissing(sellToken, buyToken, sellChain, buyChain);
       const nextId = txPanelIdRef.current + 1;
@@ -692,11 +697,54 @@ export default function Chat() {
               buyTokenDecimals: snapshotEntry.buyTokenDecimals,
               status: 'pending',
             },
+=======
+      const intentId = detail.intentId ?? null;
+
+      setMessages((prev) => {
+        // Dedupe: if a pending panel for this intent already exists, do nothing.
+        // Protects against confirmed firing twice for one click.
+        if (intentId) {
+          for (let i = prev.length - 1; i >= 0; i -= 1) {
+            const panel = prev[i]?.transactionInfoPanel;
+            if (!panel) continue;
+            if (panel.status !== 'pending') continue;
+            if (panel.intentId === intentId) return prev;
+          }
+        }
+
+        const snapshotEntry = writeSnapshotIfMissing(sellToken, buyToken, sellChain, buyChain);
+        const nextId = txPanelIdRef.current + 1;
+        txPanelIdRef.current = nextId;
+
+        return [
+          ...prev,
+          {
+            role: 'assistant',
+            content: '',
+            displayContent: '',
+            isTyping: false,
+            transactionInfoPanel: {
+              id: nextId,
+              intentId,
+              txKey: null,
+              txHash: null,
+              sellChain,
+              buyChain,
+              sellToken,
+              buyToken,
+              sellAmount: detail.amount ?? '',
+              buyAmount: null,
+              buyBalanceBeforeRaw: snapshotEntry.buyBalanceBeforeRaw,
+              buyTokenDecimals: snapshotEntry.buyTokenDecimals,
+              status: 'pending',
+            },
+>>>>>>> dev
           },
         ];
       });
     };
 
+<<<<<<< HEAD
     const handleSwapCompleteInChat = (event: Event) => {
       const detail = (event as CustomEvent).detail as {
         chain?: ChainKey;
@@ -735,12 +783,168 @@ export default function Chat() {
           );
           completedSwapBuyAmountsRef.current.set(snapshotKey, resolvedBuyAmount);
           pendingSwapSnapshotsRef.current.delete(snapshotKey);
+=======
+    const handleSwapSubmittedInChat = (event: Event) => {
+      const detail = (event as CustomEvent).detail as {
+        sellToken?: string;
+        buyToken?: string;
+        sellChain?: ChainKey;
+        buyChain?: ChainKey;
+        amount?: string;
+        txHash?: string;
+        requestId?: string;
+        intentId?: string | null;
+      } | undefined;
+      if (!detail?.sellChain || !detail?.buyChain) return;
+      const sellChain = detail.sellChain;
+      const buyChain = detail.buyChain;
+      const sellToken = (detail.sellToken ?? '').toUpperCase();
+      const buyToken = (detail.buyToken ?? '').toUpperCase();
+      if (!sellToken || !buyToken) return;
+      const txKey = detail.txHash ?? detail.requestId ?? null;
+      const intentId = detail.intentId ?? null;
+
+      setMessages((prev) => {
+        // Primary match: same intent. A retry for the same swap intent must
+        // update the existing pending panel rather than create a second one,
+        // even if the panel already has a txKey from a prior submission.
+        if (intentId) {
+          for (let i = prev.length - 1; i >= 0; i -= 1) {
+            const message = prev[i];
+            const panel = message.transactionInfoPanel;
+            if (!panel) continue;
+            if (panel.status !== 'pending') continue;
+            if (panel.intentId !== intentId) continue;
+            const next = prev.slice();
+            next[i] = {
+              ...message,
+              transactionInfoPanel: {
+                ...panel,
+                txKey,
+                txHash: detail.txHash ?? null,
+                sellAmount: detail.amount ?? panel.sellAmount,
+              },
+            };
+            return next;
+          }
+>>>>>>> dev
+        }
+
+        // Fallback for legacy events without intentId: original token-pair
+        // matcher, only against panels that haven't been claimed yet.
+        for (let i = prev.length - 1; i >= 0; i -= 1) {
+          const message = prev[i];
+          const panel = message.transactionInfoPanel;
+          if (!panel) continue;
+          if (panel.status !== 'pending') continue;
+          if (panel.txKey !== null) continue;
+          if (panel.sellToken !== sellToken) continue;
+          if (panel.buyToken !== buyToken) continue;
+          if (panel.sellChain !== sellChain) continue;
+          const next = prev.slice();
+          next[i] = {
+            ...message,
+            transactionInfoPanel: {
+              ...panel,
+              txKey,
+              txHash: detail.txHash ?? null,
+              sellAmount: detail.amount ?? panel.sellAmount,
+            },
+          };
+          return next;
+        }
+
+        const snapshotEntry = writeSnapshotIfMissing(sellToken, buyToken, sellChain, buyChain);
+        const nextId = txPanelIdRef.current + 1;
+        txPanelIdRef.current = nextId;
+        return [
+          ...prev,
+          {
+            role: 'assistant',
+            content: '',
+            displayContent: '',
+            isTyping: false,
+            transactionInfoPanel: {
+              id: nextId,
+              intentId,
+              txKey,
+              txHash: detail.txHash ?? null,
+              sellChain,
+              buyChain,
+              sellToken,
+              buyToken,
+              sellAmount: detail.amount ?? '',
+              buyAmount: null,
+              buyBalanceBeforeRaw: snapshotEntry.buyBalanceBeforeRaw,
+              buyTokenDecimals: snapshotEntry.buyTokenDecimals,
+              status: 'pending',
+            },
+          },
+        ];
+      });
+    };
+
+    const handleSwapCompleteInChat = (event: Event) => {
+      const detail = (event as CustomEvent).detail as {
+        chain?: ChainKey;
+        sellToken?: string;
+        buyToken?: string;
+        txHash?: string;
+        requestId?: string;
+        intentId?: string | null;
+        balanceUpdates?: Array<{
+          chain: ChainKey;
+          symbol: string;
+          balanceAfterRaw: string | null;
+          decimals: number;
+        }>;
+      } | undefined;
+      if (!detail) return;
+      const sellToken = (detail.sellToken ?? '').toUpperCase();
+      const buyToken = (detail.buyToken ?? '').toUpperCase();
+      const sellChainFromDetail = detail.chain;
+      const txKey = detail.txHash ?? detail.requestId ?? null;
+      const intentId = detail.intentId ?? null;
+
+      // Resolve buyAmount synchronously (before setMessages) so executeIntentNow can read it.
+      let resolvedBuyAmount: string | null = null;
+      let resolvedDecimals: number | null = null;
+      if (sellChainFromDetail) {
+        const snapshotKey = `${sellToken}:${buyToken}:${sellChainFromDetail}`;
+        const snapshotForSwap = pendingSwapSnapshotsRef.current.get(snapshotKey);
+        const buyEntry = (detail.balanceUpdates ?? []).find(
+          (entry) => (entry.symbol ?? '').toUpperCase() === buyToken
+        );
+        if (buyEntry?.balanceAfterRaw) {
+          resolvedDecimals = snapshotForSwap?.buyTokenDecimals ?? buyEntry.decimals ?? 0;
+          resolvedBuyAmount = rawDeltaToHuman(
+            buyEntry.balanceAfterRaw,
+            snapshotForSwap?.buyBalanceBeforeRaw ?? null,
+            resolvedDecimals
+          );
+          completedSwapBuyAmountsRef.current.set(snapshotKey, resolvedBuyAmount);
+          pendingSwapSnapshotsRef.current.delete(snapshotKey);
         }
       }
 
       setMessages((prev) => {
         let matchedIndex = -1;
+<<<<<<< HEAD
         if (txKey) {
+=======
+        if (intentId) {
+          for (let i = prev.length - 1; i >= 0; i -= 1) {
+            const panel = prev[i]?.transactionInfoPanel;
+            if (!panel) continue;
+            if (panel.status !== 'pending') continue;
+            if (panel.intentId === intentId) {
+              matchedIndex = i;
+              break;
+            }
+          }
+        }
+        if (matchedIndex === -1 && txKey) {
+>>>>>>> dev
           for (let i = prev.length - 1; i >= 0; i -= 1) {
             const panel = prev[i]?.transactionInfoPanel;
             if (!panel) continue;
@@ -1229,6 +1433,10 @@ export default function Chat() {
           if (confirmedMeta) {
             dispatchSwapConfirmed({
               ...confirmedMeta,
+<<<<<<< HEAD
+=======
+              intentId: row.context?.cid ?? null,
+>>>>>>> dev
               timestamp: Date.now(),
             });
           }
