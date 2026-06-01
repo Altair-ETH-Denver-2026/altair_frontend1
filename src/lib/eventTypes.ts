@@ -37,10 +37,7 @@ export type SwapConfirmedEventDetail = {
   buyChain: ChainKey;
   amount: string;
   intentType: 'SINGLE_CHAIN_SWAP_INTENT' | 'CROSS_CHAIN_SWAP_INTENT' | 'BRIDGE_INTENT';
-<<<<<<< HEAD
-=======
   intentId?: string | null;
->>>>>>> dev
   timestamp: number;
 };
 
@@ -52,10 +49,7 @@ export type SwapSubmittedEventDetail = {
   amount: string;
   txHash?: string;
   requestId?: string;
-<<<<<<< HEAD
-=======
   intentId?: string | null;
->>>>>>> dev
   timestamp: number;
 };
 
@@ -67,10 +61,7 @@ export type SwapCompleteEventDetail = {
   amount: string;
   txHash?: string;
   requestId?: string;
-<<<<<<< HEAD
-=======
   intentId?: string | null;
->>>>>>> dev
   SID?: string;
   balanceUpdates?: Array<{
     chain: ChainKey;

@@ -1475,10 +1475,7 @@ export default function UserMenu() {
         sellChain?: ChainKey;
         buyChain?: ChainKey;
         amount?: string;
-<<<<<<< HEAD
-=======
         intentId?: string | null;
->>>>>>> dev
       } | undefined;
       if (!detail) return;
       const sellChain = detail.sellChain;
@@ -1486,8 +1483,6 @@ export default function UserMenu() {
       const sellToken = (detail.sellToken ?? '').toUpperCase();
       const buyToken = (detail.buyToken ?? '').toUpperCase();
       if (!sellChain || !buyChain || !sellToken || !buyToken) return;
-<<<<<<< HEAD
-=======
       const intentId = detail.intentId ?? null;
 
       // Dedupe: if a pending panel for this intent already exists, do nothing.
@@ -1503,16 +1498,12 @@ export default function UserMenu() {
         });
         if (alreadyExists) return;
       }
->>>>>>> dev
 
       const buyTokenSnapshot = balancesByChainRef.current?.[buyChain]?.tokens?.[buyToken];
       const { raw: buyBalanceBeforeRaw, decimals: buyTokenDecimals } = toRawString(buyTokenSnapshot);
 
       addTransactionInfoPanelRef.current({
-<<<<<<< HEAD
-=======
         intentId,
->>>>>>> dev
         txKey: null,
         txHash: null,
         sellChain,
@@ -1536,10 +1527,7 @@ export default function UserMenu() {
         amount?: string;
         txHash?: string;
         requestId?: string;
-<<<<<<< HEAD
-=======
         intentId?: string | null;
->>>>>>> dev
       } | undefined;
       if (!detail) return;
       const sellChain = detail.sellChain;
@@ -1548,10 +1536,6 @@ export default function UserMenu() {
       const buyToken = (detail.buyToken ?? '').toUpperCase();
       if (!sellChain || !buyChain || !sellToken || !buyToken) return;
       const txKey = detail.txHash ?? detail.requestId ?? null;
-<<<<<<< HEAD
-
-      setTransactionInfoPanelsRef.current((current) => {
-=======
       const intentId = detail.intentId ?? null;
 
       setTransactionInfoPanelsRef.current((current) => {
@@ -1576,7 +1560,6 @@ export default function UserMenu() {
 
         // Fallback for legacy events without intentId: original token-pair
         // matcher, only against panels that haven't been claimed yet.
->>>>>>> dev
         for (let i = current.length - 1; i >= 0; i -= 1) {
           const panel = current[i];
           if (panel.status !== 'pending') continue;
@@ -1601,10 +1584,7 @@ export default function UserMenu() {
           ...current,
           {
             id: nextId,
-<<<<<<< HEAD
-=======
             intentId,
->>>>>>> dev
             txKey,
             txHash: detail.txHash ?? null,
             sellChain,
@@ -1628,10 +1608,7 @@ export default function UserMenu() {
         buyToken?: string;
         txHash?: string;
         requestId?: string;
-<<<<<<< HEAD
-=======
         intentId?: string | null;
->>>>>>> dev
         balanceUpdates?: Array<{
           chain: ChainKey;
           symbol: string;
@@ -1644,12 +1621,6 @@ export default function UserMenu() {
       const buyToken = (detail.buyToken ?? '').toUpperCase();
       const sellChainFromDetail = detail.chain;
       const txKey = detail.txHash ?? detail.requestId ?? null;
-<<<<<<< HEAD
-
-      setTransactionInfoPanelsRef.current((current) => {
-        let matchedIndex = -1;
-        if (txKey) {
-=======
       const intentId = detail.intentId ?? null;
 
       setTransactionInfoPanelsRef.current((current) => {
@@ -1665,7 +1636,6 @@ export default function UserMenu() {
           }
         }
         if (matchedIndex === -1 && txKey) {
->>>>>>> dev
           for (let i = current.length - 1; i >= 0; i -= 1) {
             const panel = current[i];
             if (panel.status !== 'pending') continue;

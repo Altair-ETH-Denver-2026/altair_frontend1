@@ -8,10 +8,7 @@ import { SpinningLogo } from '../SpinningLogo';
 
 export type TransactionInfoPanelState = {
   id: number;
-<<<<<<< HEAD
-=======
   intentId: string | null;
->>>>>>> dev
   txKey: string | null;
   txHash: string | null;
   sellChain: ChainKey;

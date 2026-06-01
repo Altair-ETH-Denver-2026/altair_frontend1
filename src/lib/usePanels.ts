@@ -7,10 +7,7 @@ export type WalletPanelState = { id: number; chainKey: ChainKey | 'ALL'; isChain
 
 export type TransactionInfoPanelState = {
   id: number;
-<<<<<<< HEAD
-=======
   intentId: string | null;
->>>>>>> dev
   txKey: string | null;
   txHash: string | null;
   sellChain: ChainKey;
