@@ -777,22 +777,38 @@ export const useRelay = () => {
             const txBuffer = Buffer.from(data.transaction, 'base64');
             const versionedTx = VersionedTransaction.deserialize(txBuffer);
             const serialized = versionedTx.serialize();
-            try {
-              const sim = await withWaitLogger(
-                {
-                  file: 'altair_frontend1/src/lib/useRelay.ts',
-                  target: 'Solana simulateTransaction',
-                  description: 'Relay Solana simulation (base64 tx)'
-                },
-                () => connection.simulateTransaction(versionedTx, { sigVerify: false, replaceRecentBlockhash: true })
-              );
-              if (sim?.value?.err) {
-                console.warn('[Relay] Solana simulation error', sim.value.err, sim.value.logs ?? []);
-                const jupiterError = buildJupiterError(sim.value.err, sim.value.logs);
-                if (jupiterError) throw jupiterError;
+            // Pre-flight simulation. Only the RPC call itself is wrapped in a
+            // try/catch (so a network blip on the simulation endpoint doesn't
+            // block submission). A *verdict* error from the RPC means the swap
+            // would revert — we must not submit. On a Jupiter route failure we
+            // re-quote (slippage drift is common); on any other simulation
+            // verdict we throw so the user gets a clean error.
+            const sim = await withWaitLogger(
+              {
+                file: 'altair_frontend1/src/lib/useRelay.ts',
+                target: 'Solana simulateTransaction',
+                description: 'Relay Solana simulation (base64 tx)'
+              },
+              () => connection.simulateTransaction(versionedTx, { sigVerify: false, replaceRecentBlockhash: true })
+            ).catch((simErr) => {
+              console.warn('[Relay] Solana simulation RPC failed; continuing without preflight', simErr);
+              return null;
+            });
+            if (sim?.value?.err) {
+              console.warn('[Relay] Solana simulation error', sim.value.err, sim.value.logs ?? []);
+              const jupiterError = buildJupiterError(sim.value.err, sim.value.logs);
+              if (jupiterError) {
+                if (quoteAttempt < maxQuoteAttempts) {
+                  console.warn('[Relay] Re-quoting after Jupiter route failure (Solana base64 tx)', {
+                    quoteAttempt,
+                    maxQuoteAttempts,
+                  });
+                  shouldRetryWithFreshQuote = true;
+                  break;
+                }
+                throw jupiterError;
               }
-            } catch (err) {
-              console.warn('[Relay] Solana simulation failed', err);
+              throw new Error(`Relay Solana pre-flight simulation failed: ${JSON.stringify(sim.value.err)}`);
             }
 
             const { signature } = await withWaitLogger(
@@ -931,22 +947,34 @@ export const useRelay = () => {
               instructions: tx.instructions,
             }).compileToV0Message(lookupTables.filter(Boolean) as AddressLookupTableAccount[]);
             const versionedTx = new VersionedTransaction(compiled);
-            try {
-              const sim = await withWaitLogger(
-                {
-                  file: 'altair_frontend1/src/lib/useRelay.ts',
-                  target: 'Solana simulateTransaction',
-                  description: 'Relay Solana simulation (v0 tx)'
-                },
-                () => connection.simulateTransaction(versionedTx, { sigVerify: false, replaceRecentBlockhash: true })
-              );
-              if (sim?.value?.err) {
-                console.warn('[Relay] Solana simulation error', sim.value.err, sim.value.logs ?? []);
-                const jupiterError = buildJupiterError(sim.value.err, sim.value.logs);
-                if (jupiterError) throw jupiterError;
+            // See Branch 1 for the structural rationale: only the RPC call is in
+            // the try; verdict errors are not swallowed.
+            const sim = await withWaitLogger(
+              {
+                file: 'altair_frontend1/src/lib/useRelay.ts',
+                target: 'Solana simulateTransaction',
+                description: 'Relay Solana simulation (v0 tx)'
+              },
+              () => connection.simulateTransaction(versionedTx, { sigVerify: false, replaceRecentBlockhash: true })
+            ).catch((simErr) => {
+              console.warn('[Relay] Solana simulation RPC failed; continuing without preflight', simErr);
+              return null;
+            });
+            if (sim?.value?.err) {
+              console.warn('[Relay] Solana simulation error', sim.value.err, sim.value.logs ?? []);
+              const jupiterError = buildJupiterError(sim.value.err, sim.value.logs);
+              if (jupiterError) {
+                if (quoteAttempt < maxQuoteAttempts) {
+                  console.warn('[Relay] Re-quoting after Jupiter route failure (Solana v0 tx)', {
+                    quoteAttempt,
+                    maxQuoteAttempts,
+                  });
+                  shouldRetryWithFreshQuote = true;
+                  break;
+                }
+                throw jupiterError;
               }
-            } catch (err) {
-              console.warn('[Relay] Solana simulation failed', err);
+              throw new Error(`Relay Solana pre-flight simulation failed: ${JSON.stringify(sim.value.err)}`);
             }
             const serialized = versionedTx.serialize();
             const { signature } = await withWaitLogger(
@@ -984,22 +1012,34 @@ export const useRelay = () => {
               console.warn('[Relay] Solana fee lookup failed', feeErr);
             }
           } else {
-            try {
-              const sim = await withWaitLogger(
-                {
-                  file: 'altair_frontend1/src/lib/useRelay.ts',
-                  target: 'Solana simulateTransaction',
-                  description: 'Relay Solana simulation (legacy tx)'
-                },
-                () => connection.simulateTransaction(tx)
-              );
-              if (sim?.value?.err) {
-                console.warn('[Relay] Solana simulation error', sim.value.err, sim.value.logs ?? []);
-                const jupiterError = buildJupiterError(sim.value.err, sim.value.logs);
-                if (jupiterError) throw jupiterError;
+            // See Branch 1 for the structural rationale: only the RPC call is in
+            // the try; verdict errors are not swallowed.
+            const sim = await withWaitLogger(
+              {
+                file: 'altair_frontend1/src/lib/useRelay.ts',
+                target: 'Solana simulateTransaction',
+                description: 'Relay Solana simulation (legacy tx)'
+              },
+              () => connection.simulateTransaction(tx)
+            ).catch((simErr) => {
+              console.warn('[Relay] Solana simulation RPC failed; continuing without preflight', simErr);
+              return null;
+            });
+            if (sim?.value?.err) {
+              console.warn('[Relay] Solana simulation error', sim.value.err, sim.value.logs ?? []);
+              const jupiterError = buildJupiterError(sim.value.err, sim.value.logs);
+              if (jupiterError) {
+                if (quoteAttempt < maxQuoteAttempts) {
+                  console.warn('[Relay] Re-quoting after Jupiter route failure (Solana legacy tx)', {
+                    quoteAttempt,
+                    maxQuoteAttempts,
+                  });
+                  shouldRetryWithFreshQuote = true;
+                  break;
+                }
+                throw jupiterError;
               }
-            } catch (err) {
-              console.warn('[Relay] Solana simulation failed', err);
+              throw new Error(`Relay Solana pre-flight simulation failed: ${JSON.stringify(sim.value.err)}`);
             }
             const serialized = tx.serialize({ requireAllSignatures: false, verifySignatures: false });
             const { signature } = await withWaitLogger(
@@ -1231,6 +1271,10 @@ export const useRelay = () => {
 
         if (shouldRetryWithFreshQuote) break;
         }
+        // Propagate the re-quote signal out of the step loop too — otherwise a
+        // multi-step Relay quote would keep submitting remaining steps with
+        // stale data.
+        if (shouldRetryWithFreshQuote) break;
       }
 
       if (shouldRetryWithFreshQuote) {
