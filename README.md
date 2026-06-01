@@ -60,8 +60,13 @@ Wallet display mode is configured in [`config/ui_config.ts`](config/ui_config.ts
 - Solana swap: [`src/lib/useSolanaSwap.ts`](src/lib/useSolanaSwap.ts)
 - Solana transfer: [`src/lib/useSolanaTransfer.ts`](src/lib/useSolanaTransfer.ts)
 - Cross-chain relay: [`src/lib/useRelay.ts`](src/lib/useRelay.ts)
+- Jupiter Lend (Earn) deposit/withdraw: [`src/lib/useJupiterLend.ts`](src/lib/useJupiterLend.ts)
 
 These hooks execute chain actions and emit `altair:swap-complete` to drive wallet/balance UI updates.
+
+### 4) Jupiter Lend (Earn) chat flow
+
+When the user says "lend 10 USDC" or "withdraw my lent USDC", the chat model emits a `LEND_DEPOSIT_INTENT` / `LEND_WITHDRAW_INTENT` (see `INTENTS.LEND_INTENTS` in `config/ai_config.ts`). The chat panel renders a Confirm / Cancel row (templates `CONFIRM_LEND_DEPOSIT` / `CONFIRM_LEND_WITHDRAW`). On confirm, [`useJupiterLend.executeLend(...)`](src/lib/useJupiterLend.ts) calls the backend proxy, Privy signs+sends the Solana tx, then the frontend writes back to `/api/lend-positions`. Today only Solana mainnet is supported. See [`../LEND_PLAN.md`](../LEND_PLAN.md) for the full design.
 
 ---
 

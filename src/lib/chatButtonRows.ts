@@ -1,6 +1,8 @@
 'use client';
 
 import { CHAT_BUTTON_ROW_TEMPLATES as AI_CHAT_BUTTON_ROW_TEMPLATES } from '../../config/ai_config';
+import type { ChatLendIntent } from './lendTypes';
+import { isLendIntent } from './lendTypes';
 
 export type ChatSwapIntent = {
   type: 'SINGLE_CHAIN_SWAP_INTENT' | 'CROSS_CHAIN_SWAP_INTENT' | 'BRIDGE_INTENT';
@@ -10,6 +12,9 @@ export type ChatSwapIntent = {
   sellTokenChain?: string | null;
   buyTokenChain?: string | null;
 };
+
+/** Union of all chat-actionable intents that have a button row template. */
+export type ChatActionableIntent = ChatSwapIntent | ChatLendIntent;
 
 export type ChatButtonAction =
   | {
@@ -28,7 +33,11 @@ export type ChatButtonItem = {
   action: ChatButtonAction;
 };
 
-export type ChatButtonRowTemplateKey = 'CONFIRM_SWAP' | 'SWAP_FOLLOWUP';
+export type ChatButtonRowTemplateKey =
+  | 'CONFIRM_SWAP'
+  | 'SWAP_FOLLOWUP'
+  | 'CONFIRM_LEND_DEPOSIT'
+  | 'CONFIRM_LEND_WITHDRAW';
 export type ChatButtonRowLogicTrigger = 'TRANSACTION_SUBMITTED';
 
 export type ChatButtonRowModel = {
@@ -36,7 +45,7 @@ export type ChatButtonRowModel = {
   template: ChatButtonRowTemplateKey;
   buttons: ChatButtonItem[];
   context?: {
-    intent?: ChatSwapIntent | null;
+    intent?: ChatActionableIntent | null;
     cid?: string | null;
   };
   isActive?: boolean;
@@ -45,11 +54,11 @@ export type ChatButtonRowModel = {
 };
 
 type ChatButtonRowTemplateFactory = (params: {
-  intent: ChatSwapIntent;
+  intent: ChatActionableIntent;
   cid?: string | null;
 }) => ChatButtonRowModel;
 
-const isSwapIntent = (intent: ChatSwapIntent | null): intent is ChatSwapIntent =>
+const isSwapIntent = (intent: ChatActionableIntent | null): intent is ChatSwapIntent =>
   Boolean(
     intent &&
       (intent.type === 'SINGLE_CHAIN_SWAP_INTENT' ||
@@ -57,13 +66,22 @@ const isSwapIntent = (intent: ChatSwapIntent | null): intent is ChatSwapIntent =
         intent.type === 'BRIDGE_INTENT')
   );
 
+const resolveTokenLabel = (intent: ChatActionableIntent): string => {
+  if (isLendIntent(intent)) {
+    return String(intent.token ?? 'TOKEN').toUpperCase();
+  }
+  if (isSwapIntent(intent)) {
+    return String(intent.buy ?? intent.sell ?? 'TOKEN').toUpperCase();
+  }
+  return 'TOKEN';
+};
+
 const buildTemplateFromConfig = (params: {
   template: ChatButtonRowTemplateKey;
-  intent: ChatSwapIntent;
+  intent: ChatActionableIntent;
   cid?: string | null;
 }): ChatButtonRowModel => {
-  const templateConfig = CHAT_BUTTON_ROW_TEMPLATES[params.template];
-  const tokenLabel = String(params.intent.buy ?? params.intent.sell ?? 'TOKEN').toUpperCase();
+  const tokenLabel = resolveTokenLabel(params.intent);
   const templateButtons = AI_CHAT_BUTTON_ROW_TEMPLATES[params.template].buttons;
   return {
     id: `row-${params.template.toLowerCase()}-${Date.now()}`,
@@ -85,11 +103,13 @@ const buildTemplateFromConfig = (params: {
 export const CHAT_BUTTON_ROW_TEMPLATES: Record<ChatButtonRowTemplateKey, ChatButtonRowTemplateFactory> = {
   CONFIRM_SWAP: (params) => buildTemplateFromConfig({ template: 'CONFIRM_SWAP', ...params }),
   SWAP_FOLLOWUP: (params) => buildTemplateFromConfig({ template: 'SWAP_FOLLOWUP', ...params }),
+  CONFIRM_LEND_DEPOSIT: (params) => buildTemplateFromConfig({ template: 'CONFIRM_LEND_DEPOSIT', ...params }),
+  CONFIRM_LEND_WITHDRAW: (params) => buildTemplateFromConfig({ template: 'CONFIRM_LEND_WITHDRAW', ...params }),
 };
 
 export const buildChatButtonRowFromLogicTrigger = (params: {
   trigger: ChatButtonRowLogicTrigger;
-  intent: ChatSwapIntent;
+  intent: ChatActionableIntent;
   cid?: string | null;
 }): ChatButtonRowModel | null => {
   const templates = Object.entries(AI_CHAT_BUTTON_ROW_TEMPLATES) as Array<
@@ -115,13 +135,27 @@ export const buildChatButtonRowFromLogicTrigger = (params: {
 };
 
 export const buildChatButtonRowFromIntent = (params: {
-  intent: ChatSwapIntent | null;
+  intent: ChatActionableIntent | null;
   cid?: string | null;
 }): ChatButtonRowModel | null => {
-  if (!isSwapIntent(params.intent)) return null;
-  return CHAT_BUTTON_ROW_TEMPLATES.CONFIRM_SWAP({
-    intent: params.intent,
-    cid: params.cid ?? null,
-  });
-};
+  const intent = params.intent;
+  if (!intent) return null;
 
+  if (isLendIntent(intent)) {
+    const templateKey: ChatButtonRowTemplateKey =
+      intent.type === 'LEND_DEPOSIT_INTENT' ? 'CONFIRM_LEND_DEPOSIT' : 'CONFIRM_LEND_WITHDRAW';
+    return CHAT_BUTTON_ROW_TEMPLATES[templateKey]({
+      intent,
+      cid: params.cid ?? null,
+    });
+  }
+
+  if (isSwapIntent(intent)) {
+    return CHAT_BUTTON_ROW_TEMPLATES.CONFIRM_SWAP({
+      intent,
+      cid: params.cid ?? null,
+    });
+  }
+
+  return null;
+};
