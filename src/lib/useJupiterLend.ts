@@ -157,6 +157,8 @@ export function useJupiterLend() {
           amountRaw = underlyingBalance;
           underlyingForWriteback = underlyingBalance;
         } else {
+        amountRaw = match?.underlyingAmount ?? match?.shares ?? '0';
+        if (amountRaw === '0') {
           throw new Error(`No active ${tokenSymbol} lend position to withdraw.`);
         }
       } catch (err) {
