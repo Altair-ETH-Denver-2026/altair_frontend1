@@ -125,8 +125,13 @@ export function useJupiterLend() {
       console.warn('[Lend] markets fetch failed (will still attempt action):', err);
     }
 
-    // Resolve amount in raw lamports. For 'all' withdraw we read the user's position size.
+    // Resolve amount in raw lamports. For 'all' withdraw we read the user's position
+    // and switch to /redeem (share-based) so every share is burned (true full closeout
+    // including accrued yield). For sized withdraws we stay on /withdraw (underlying-based).
     let amountRaw = '';
+    let useRedeem = false;
+    // Underlying amount we will record in MongoDB for accounting (always in token lamports).
+    let underlyingForWriteback: string | null = null;
     const trimmed = String(params.amount).trim().toLowerCase();
     if (params.action === 'withdraw' && (trimmed === 'all' || trimmed === 'max')) {
       try {
@@ -140,9 +145,22 @@ export function useJupiterLend() {
             (typeof p.asset === 'string' && p.asset === tokenMint) ||
             (typeof p.symbol === 'string' && p.symbol.toUpperCase() === tokenSymbol)
         );
-        amountRaw = match?.underlyingAmount ?? match?.shares ?? '0';
-        if (amountRaw === '0') {
-          throw new Error(`No active ${tokenSymbol} lend position to withdraw.`);
+        const shareBalance = match?.shares ?? '0';
+        const underlyingBalance = match?.underlyingAmount ?? '0';
+        if (shareBalance && shareBalance !== '0') {
+          // Prefer /redeem with full share balance for clean closeout.
+          useRedeem = true;
+          amountRaw = shareBalance;
+          underlyingForWriteback = underlyingBalance !== '0' ? underlyingBalance : null;
+        } else if (underlyingBalance && underlyingBalance !== '0') {
+          // Fallback when share balance isn't returned for some reason.
+          amountRaw = underlyingBalance;
+          underlyingForWriteback = underlyingBalance;
+        } else {
+          amountRaw = match?.underlyingAmount ?? match?.shares ?? '0';
+          if (amountRaw === '0') {
+            throw new Error(`No active ${tokenSymbol} lend position to withdraw.`);
+          }
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -153,10 +171,18 @@ export function useJupiterLend() {
       if (amountRaw === '0') {
         throw new Error('Amount must be greater than 0.');
       }
+      if (params.action === 'withdraw') {
+        underlyingForWriteback = amountRaw;
+      }
     }
 
     const accessToken = await getAccessToken();
-    const proxyPath = params.action === 'deposit' ? '/api/jupiter/lend/deposit' : '/api/jupiter/lend/withdraw';
+    const proxyPath =
+      params.action === 'deposit'
+        ? '/api/jupiter/lend/deposit'
+        : useRedeem
+          ? '/api/jupiter/lend/redeem'
+          : '/api/jupiter/lend/withdraw';
     const proxyRes = await withWaitLogger(
       {
         file: 'altair_frontend1/src/lib/useJupiterLend.ts',
@@ -302,7 +328,10 @@ export function useJupiterLend() {
           tokenSymbol,
           tokenMint,
           decimals,
-          amountRaw,
+          // For redeem flow, amountRaw is share quantity, but for accounting we want
+          // the underlying asset amount that was returned to the user.
+          amountRaw: underlyingForWriteback ?? amountRaw,
+          shareAmountRaw: useRedeem ? amountRaw : null,
           txHash,
           vault: market?.vault ?? null,
           apySnapshot: typeof market?.apy === 'number' ? market.apy : null,
