@@ -61,6 +61,7 @@ Wallet display mode is configured in [`config/ui_config.ts`](config/ui_config.ts
 - Solana transfer: [`src/lib/useSolanaTransfer.ts`](src/lib/useSolanaTransfer.ts)
 - Cross-chain relay: [`src/lib/useRelay.ts`](src/lib/useRelay.ts)
 - Jupiter Trigger (limit / scheduled orders): [`src/lib/useJupiterTrigger.ts`](src/lib/useJupiterTrigger.ts)
+- Jupiter Lend (Earn) deposit/withdraw: [`src/lib/useJupiterLend.ts`](src/lib/useJupiterLend.ts)
 
 These hooks execute chain actions and emit `altair:swap-complete` (or `altair:balance-stale`) to drive wallet/balance UI updates.
 
@@ -72,6 +73,16 @@ When the user says "sell 100 BONK if price hits $0.00003" or "swap 1 SOL to USDC
 - For **time** orders: skips Jupiter (the server-side scheduler is a follow-up) and only writes back to `/api/limit-orders` so the order is tracked and the chat model can remind the user about it.
 
 The **LimitOrdersPanel** ([`src/components/panels/LimitOrdersPanel.tsx`](src/components/panels/LimitOrdersPanel.tsx)) shows pending orders for the connected Solana wallet and lets the user cancel them. Open it via the **List** icon in the top menu (next to the wallet panel). Today this lists Altair's Mongo-tracked orders; cross-referencing with `/api/jupiter/trigger/orders` for fill status is a follow-up.
+
+### 4) Jupiter Lend (Earn) chat flow
+
+When the user says "lend 10 USDC" or "withdraw my lent USDC", the chat model emits a `LEND_DEPOSIT_INTENT` / `LEND_WITHDRAW_INTENT` (see `INTENTS.LEND_INTENTS` in `config/ai_config.ts`). The chat panel renders a Confirm / Cancel row (templates `CONFIRM_LEND_DEPOSIT` / `CONFIRM_LEND_WITHDRAW`). On confirm, [`useJupiterLend.executeLend(...)`](src/lib/useJupiterLend.ts) calls the backend proxy, Privy signs+sends the Solana tx, then the frontend writes back to `/api/lend-positions`. Today only Solana mainnet is supported. See [`../LEND_PLAN.md`](../LEND_PLAN.md) for the full design.
+
+### 5) Jupiter Lend panel + wallet integration
+
+- A dedicated **LendPanel** ([`src/components/panels/LendPanel.tsx`](src/components/panels/LendPanel.tsx)) renders markets (with APY) and the user's active positions. Each market has an inline deposit form; each position has a "Withdraw All" button (uses the `/redeem` flow under the hood for clean closeout including accrued yield). Open it via the **Lend** (Coins) icon in the top menu — it appears next to the wallet panel.
+- The **wallet panel** ([`src/components/panels/WalletPanel.tsx`](src/components/panels/WalletPanel.tsx)) gets a "Lent · Jupiter · X% APY" sub-row beneath any token (e.g. USDC) that the user is currently lending on Solana. Click the sub-row to open the LendPanel.
+- Position + market data is fetched and cached by [`src/lib/useLendPositions.ts`](src/lib/useLendPositions.ts), which auto-refreshes after `altair:swap-complete` events whose `sellToken` or `buyToken` starts with `LEND:`.
 
 ---
 

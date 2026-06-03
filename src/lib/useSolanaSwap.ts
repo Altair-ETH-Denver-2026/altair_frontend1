@@ -7,6 +7,7 @@ import { usePrivy } from '@privy-io/react-auth';
 import { useWallets, useSignAndSendTransaction } from '@privy-io/react-auth/solana';
 import { readCachedTokenSnapshot, resolveSelectedChain } from './useSwap';
 import { dispatchSwapSubmitted, dispatchBalanceStale } from './eventTypes';
+import { getBackendBaseUrl } from './backendUrl';
 import type { ChainKey } from '../../config/blockchain_config';
 import { GAS_TOKENS } from '../../config/blockchain_config';
 
@@ -96,7 +97,7 @@ export function useSolanaSwap(explicitChain?: ChainKey) {
         description: 'Solana swap route response',
       },
       () =>
-        fetch('/api/test-swap', {
+        fetch(`${getBackendBaseUrl()}/api/test-swap`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -220,6 +221,7 @@ export function useSolanaSwap(explicitChain?: ChainKey) {
         buyChain: 'SOLANA_MAINNET',
         amount: sellAmount,
         txHash,
+        intentId: CID ?? null,
         timestamp: Date.now(),
       });
 
@@ -260,7 +262,7 @@ export function useSolanaSwap(explicitChain?: ChainKey) {
           description: 'Solana swap writeback after confirmation',
         },
         () =>
-          fetch('/api/test-swap', {
+          fetch(`${getBackendBaseUrl()}/api/test-swap`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -304,6 +306,8 @@ export function useSolanaSwap(explicitChain?: ChainKey) {
               chain: 'SOLANA_MAINNET',
               sellToken: sellToken.toUpperCase(),
               buyToken: buyToken.toUpperCase(),
+              txHash,
+              intentId: CID ?? null,
               balanceUpdates: Array.isArray(writebackPayload?.balanceUpdates)
                 ? writebackPayload.balanceUpdates
                 : [],

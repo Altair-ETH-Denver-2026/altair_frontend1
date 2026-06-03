@@ -3,9 +3,11 @@
 import { usePrivy, useWallets } from '@privy-io/react-auth';
 import { ethers } from 'ethers';
 import { withWaitLogger } from './waitLogger';
-import { BLOCKCHAIN, CHAINS, GAS_TOKENS, type ChainKey } from '@config/blockchain_config';
+import { BLOCKCHAIN, CHAINS, GAS_TOKENS, SWAP_PROVIDER_OPTIONS, type ChainKey } from '@config/blockchain_config';
 import { BASE_MAINNET, BASE_SEPOLIA, ETH_MAINNET, ETH_SEPOLIA, resolveRpcUrls } from '@config/chain_info';
 import { dispatchSwapSubmitted, dispatchBalanceStale } from './eventTypes';
+import { getBackendBaseUrl } from './backendUrl';
+import { getCachedPrivyAccessToken } from './privyTokenCache';
 
 const chainConfigs = {
   BASE_SEPOLIA,
@@ -164,8 +166,136 @@ const ensureEvmChain = async (
   }
 };
 
+/**
+ * Determine if an error should trigger a retry with the next provider.
+ * Returns true for retryable errors (try next provider), false for fatal errors (fail immediately).
+ */
+function shouldRetryWithNextProvider(error: unknown): boolean {
+  if (error instanceof Error) {
+    const message = error.message.toLowerCase();
+    
+    // Retryable errors (try next provider)
+    if (message.includes('transaction reverted')) return true;
+    if (message.includes('execution reverted')) return true;
+    if (message.includes('insufficient allowance')) return true;
+    if (message.includes('permit2')) return true;
+    if (message.includes('call exception')) return true;
+    if (message.includes('network error')) return true;
+    if (message.includes('timeout')) return true;
+    if (message.includes('failed to fetch')) return true;
+    
+    // Non-retryable errors (fail immediately)
+    if (message.includes('insufficient funds')) return false;
+    if (message.includes('user rejected')) return false;
+    if (message.includes('user denied')) return false;
+    if (message.includes('nonce')) return false;
+    // Auth failures must not loop. They also cannot be "fixed" by re-running the
+    // swap, and if the swap already confirmed on-chain a retry would re-submit.
+    if (message.includes('access token')) return false;
+    if (message.includes('unauthorized')) return false;
+  }
+  
+  // Default: retry (conservative approach)
+  return true;
+}
+
+/**
+ * Approve ERC-20 token for spending with improved error handling and verification.
+ * Some tokens (like USDT) require resetting allowance to 0 before setting a new value.
+ */
+async function approveTokenIfNeeded(params: {
+  sellTokenAddress: string;
+  spenderAddress: string;
+  amountWei: bigint;
+  recipient: string;
+  managedSigner: ethers.NonceManager;
+}): Promise<void> {
+  const { sellTokenAddress, spenderAddress, amountWei, recipient, managedSigner } = params;
+  
+  const erc20 = new ethers.Contract(
+    sellTokenAddress,
+    ['function allowance(address,address) view returns (uint256)', 'function approve(address,uint256)'],
+    managedSigner,
+  );
+  
+  const currentAllowance = await withWaitLogger(
+    {
+      file: 'altair_frontend1/src/lib/useSwap.ts',
+      target: 'ERC20.allowance',
+      description: 'check token allowance',
+    },
+    () => erc20.allowance(recipient, spenderAddress)
+  );
+  
+  console.log('[useSwap] Current allowance:', currentAllowance.toString(), 'Required:', amountWei.toString());
+  
+  // Only approve if current allowance is insufficient
+  if (currentAllowance < amountWei) {
+    console.log('[useSwap] Insufficient allowance, requesting approval');
+    
+    // Some tokens (like USDT) require resetting to 0 first if there's an existing allowance
+    if (currentAllowance > 0n) {
+      console.log('[useSwap] Resetting existing allowance to 0 first');
+      const resetTx = await withWaitLogger(
+        {
+          file: 'altair_frontend1/src/lib/useSwap.ts',
+          target: 'ERC20.approve (reset)',
+          description: 'reset token allowance to 0',
+        },
+        () => erc20.approve(spenderAddress, 0n)
+      );
+      await withWaitLogger(
+        {
+          file: 'altair_frontend1/src/lib/useSwap.ts',
+          target: 'ERC20.approve.wait (reset)',
+          description: 'reset allowance confirmation',
+        },
+        () => resetTx.wait()
+      );
+      console.log('[useSwap] Allowance reset confirmed');
+    }
+    
+    // Now approve MaxUint256
+    console.log('[useSwap] Approving MaxUint256');
+    const approveTx = await withWaitLogger(
+      {
+        file: 'altair_frontend1/src/lib/useSwap.ts',
+        target: 'ERC20.approve',
+        description: 'token approval transaction submission',
+      },
+      () => erc20.approve(spenderAddress, ethers.MaxUint256)
+    );
+    await withWaitLogger(
+      {
+        file: 'altair_frontend1/src/lib/useSwap.ts',
+        target: 'ERC20.approve.wait',
+        description: 'token approval confirmation',
+      },
+      () => approveTx.wait()
+    );
+    console.log('[useSwap] Approval confirmed');
+    
+    // Verify the new allowance
+    const newAllowance = await withWaitLogger(
+      {
+        file: 'altair_frontend1/src/lib/useSwap.ts',
+        target: 'ERC20.allowance (verify)',
+        description: 'verify new allowance',
+      },
+      () => erc20.allowance(recipient, spenderAddress)
+    );
+    console.log('[useSwap] New allowance:', newAllowance.toString());
+    
+    if (newAllowance < amountWei) {
+      throw new Error(`Approval succeeded but allowance is still insufficient: ${newAllowance.toString()} < ${amountWei.toString()}`);
+    }
+  } else {
+    console.log('[useSwap] Sufficient allowance already exists, skipping approval');
+  }
+}
+
 export const useSwap = (explicitChain?: ChainKey) => {
-  const { authenticated } = usePrivy();
+  const { authenticated, getAccessToken } = usePrivy();
   const { wallets } = useWallets();
 
   return async (sellToken: string, sellAmount: string, buyToken: string, CID?: string | null) =>
@@ -233,194 +363,268 @@ export const useSwap = (explicitChain?: ChainKey) => {
       const buySnapshot = readCachedTokenSnapshot({ chainKey: selectedChain, walletAddress: recipient, symbol: normalizedBuy });
       const gasSnapshot = readCachedTokenSnapshot({ chainKey: selectedChain, walletAddress: recipient, symbol: gasSymbol });
 
-      const routeResponse = await withWaitLogger(
-        {
-          file: 'altair_frontend1/src/lib/useSwap.ts',
-          target: '/api/test-swap',
-          description: 'swap route response',
-        },
-        () =>
-          fetch('/api/test-swap', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify({
-              chain: selectedChain,
-              sellToken: effectiveSell,
-              buyToken: normalizedBuy,
-              amount: sellAmount,
-              recipient,
-              CID: CID ?? null,
-              balanceSnapshots: {
-                sellTokenBeforeRaw: sellSnapshot.raw,
-                buyTokenBeforeRaw: buySnapshot.raw,
-                gasTokenBeforeRaw: gasSnapshot.raw,
-                gasTokenSymbol: gasSymbol,
-                gasTokenDecimals: gasSnapshot.decimals ?? (gasSymbol === 'SOL' ? 9 : 18),
+      // Fetch the Privy access token once for the whole swap. We send it as a
+      // Bearer header on both /api/test-swap calls because cross-site cookies do
+      // not reach the prod backend (different registrable domain). On localhost
+      // the cookie still works as a fallback. A token-fetch failure is non-fatal;
+      // the backend will simply 401 the writeback, which Fix 2 now swallows.
+      const accessToken = await getCachedPrivyAccessToken(getAccessToken).catch(() => null);
+
+      // Provider retry loop
+      const providers = ['0x v2', '0x v1'];
+      const maxIterations = SWAP_PROVIDER_OPTIONS.maxAttemptsPerOption || 2;
+      
+      let lastError: Error | null = null;
+      
+      for (let iteration = 0; iteration < maxIterations; iteration++) {
+        for (const providerName of providers) {
+          try {
+            console.log(`[useSwap] Attempting swap with ${providerName} (iteration ${iteration + 1}/${maxIterations})`);
+            
+            // 1. Get quote from backend (pass provider explicitly)
+            const routeResponse = await withWaitLogger(
+              {
+                file: 'altair_frontend1/src/lib/useSwap.ts',
+                target: '/api/test-swap',
+                description: `swap route response (${providerName})`,
               },
-            }),
-          })
-      );
+              () =>
+                fetch(`${getBackendBaseUrl()}/api/test-swap`, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+                  },
+                  credentials: 'include',
+                  body: JSON.stringify({
+                    chain: selectedChain,
+                    sellToken: effectiveSell,
+                    buyToken: normalizedBuy,
+                    amount: sellAmount,
+                    recipient,
+                    provider: providerName,
+                    CID: CID ?? null,
+                    balanceSnapshots: {
+                      sellTokenBeforeRaw: sellSnapshot.raw,
+                      buyTokenBeforeRaw: buySnapshot.raw,
+                      gasTokenBeforeRaw: gasSnapshot.raw,
+                      gasTokenSymbol: gasSymbol,
+                      gasTokenDecimals: gasSnapshot.decimals ?? (gasSymbol === 'SOL' ? 9 : 18),
+                    },
+                  }),
+                })
+            );
 
-      if (!routeResponse.ok) {
-        const errorPayload = await routeResponse.json().catch(() => ({}));
-        const message = typeof errorPayload?.error === 'string'
-          ? errorPayload.error
-          : 'Failed to fetch swap route';
-        const err = new Error(message) as Error & {
-          code?: string;
-          payload?: unknown;
-          status?: number;
-        };
-        err.code = typeof errorPayload?.code === 'string' ? errorPayload.code : undefined;
-        err.payload = errorPayload;
-        err.status = routeResponse.status;
-        throw err;
-      }
+            if (!routeResponse.ok) {
+              const errorPayload = await routeResponse.json().catch(() => ({}));
+              const message = typeof errorPayload?.error === 'string'
+                ? errorPayload.error
+                : 'Failed to fetch swap route';
+              const err = new Error(message) as Error & {
+                code?: string;
+                payload?: unknown;
+                status?: number;
+              };
+              err.code = typeof errorPayload?.code === 'string' ? errorPayload.code : undefined;
+              err.payload = errorPayload;
+              err.status = routeResponse.status;
+              throw err;
+            }
 
-      const routePayload = (await routeResponse.json()) as {
-        methodParameters?: { to: string; calldata: string; value: string };
-        sellTokenAddress?: string;
-      };
+            const routePayload = (await routeResponse.json()) as {
+              methodParameters?: { to: string; calldata: string; value: string };
+              sellTokenAddress?: string;
+              integratorFee?: { token: string; amount: string; type: string } | null;
+            };
 
-      if (!routePayload.methodParameters) {
-        throw new Error('No swap route found');
-      }
+            if (!routePayload.methodParameters) {
+              throw new Error('No swap route found');
+            }
 
-      const methodParameters = routePayload.methodParameters;
+            const methodParameters = routePayload.methodParameters;
 
-      if (effectiveSell !== 'ETH') {
-        const sellTokenAddress = routePayload.sellTokenAddress;
-        if (!sellTokenAddress) {
-          throw new Error('Missing sell token address for approval');
-        }
-        const erc20Approve = new ethers.Contract(
-          sellTokenAddress,
-          ['function approve(address,uint256)'],
-          managedSigner,
-        );
-        const approveTx = await withWaitLogger(
-          {
-            file: 'altair_frontend1/src/lib/useSwap.ts',
-            target: 'ERC20.approve',
-            description: 'token approval transaction submission',
-          },
-          () => erc20Approve.approve(methodParameters.to, ethers.MaxUint256)
-        );
-        await withWaitLogger(
-          {
-            file: 'altair_frontend1/src/lib/useSwap.ts',
-            target: 'ERC20.approve.wait',
-            description: 'token approval confirmation',
-          },
-          () => approveTx.wait()
-        );
-      }
+            // 2. Approve if needed
+            if (effectiveSell !== 'ETH') {
+              const sellTokenAddress = routePayload.sellTokenAddress;
+              if (!sellTokenAddress) {
+                throw new Error('Missing sell token address for approval');
+              }
+              
+              await approveTokenIfNeeded({
+                sellTokenAddress,
+                spenderAddress: methodParameters.to,
+                amountWei,
+                recipient,
+                managedSigner,
+              });
+            }
 
-      const tx = await withWaitLogger(
-        {
-          file: 'altair_frontend1/src/lib/useSwap.ts',
-          target: 'sendTransaction',
-          description: 'swap transaction submission',
-        },
-        () =>
-          managedSigner.sendTransaction({
-            to: methodParameters.to,
-            data: methodParameters.calldata,
-            value: methodParameters.value,
-            gasLimit: 1_000_000n,
-          })
-      );
+            // 3. Execute transaction
+            const tx = await withWaitLogger(
+              {
+                file: 'altair_frontend1/src/lib/useSwap.ts',
+                target: 'sendTransaction',
+                description: `swap transaction submission (${providerName})`,
+              },
+              () =>
+                managedSigner.sendTransaction({
+                  to: methodParameters.to,
+                  data: methodParameters.calldata,
+                  value: methodParameters.value,
+                  gasLimit: 1_000_000n,
+                })
+            );
 
-      // Dispatch swap-submitted event
-      dispatchSwapSubmitted({
-        sellToken: effectiveSell,
-        buyToken: normalizedBuy,
-        sellChain: selectedChain,
-        buyChain: selectedChain, // same chain for single-chain swap
-        amount: sellAmount,
-        txHash: tx.hash,
-        timestamp: Date.now(),
-      });
-
-      // Mark involved tokens as stale due to swap initiation
-      const now = Date.now();
-      const tokensToMarkStale = new Set([effectiveSell, normalizedBuy, gasSymbol]);
-      tokensToMarkStale.forEach((symbol) => {
-        if (symbol) {
-          dispatchBalanceStale({
-            chainKey: selectedChain,
-            symbol,
-            reason: 'swap',
-            timestamp: now,
-          });
-        }
-      });
-
-      await withWaitLogger(
-        {
-          file: 'altair_frontend1/src/lib/useSwap.ts',
-          target: 'sendTransaction.wait',
-          description: 'swap transaction confirmation',
-        },
-        () => tx.wait()
-      );
-      await withWaitLogger(
-        {
-          file: 'altair_frontend1/src/lib/useSwap.ts',
-          target: '/api/test-swap writeback',
-          description: 'swap writeback after confirmation',
-        },
-        async () => {
-          const writebackRes = await fetch('/api/test-swap', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify({
-              chain: selectedChain,
+            // Dispatch swap-submitted event
+            dispatchSwapSubmitted({
               sellToken: effectiveSell,
               buyToken: normalizedBuy,
+              sellChain: selectedChain,
+              buyChain: selectedChain, // same chain for single-chain swap
               amount: sellAmount,
-              recipient,
-              CID: CID ?? null,
               txHash: tx.hash,
-              balanceSnapshots: {
-                sellTokenBeforeRaw: sellSnapshot.raw,
-                buyTokenBeforeRaw: buySnapshot.raw,
-                gasTokenBeforeRaw: gasSnapshot.raw,
-                gasTokenSymbol: gasSymbol,
-                gasTokenDecimals: gasSnapshot.decimals,
-              },
-            }),
-          });
-          const writebackPayload = await writebackRes.json().catch(() => ({} as {
-            error?: string;
-            balanceUpdates?: Array<{ chain: ChainKey; symbol: string; balanceAfterRaw: string | null; decimals: number }>;
-          }));
-          if (!writebackRes.ok) {
-            throw new Error(
-              typeof writebackPayload?.error === 'string'
-                ? writebackPayload.error
-                : 'Swap writeback failed'
-            );
-          }
+              intentId: CID ?? null,
+              timestamp: Date.now(),
+            });
 
-          if (typeof window !== 'undefined') {
-            window.dispatchEvent(
-              new CustomEvent('altair:swap-complete', {
-                detail: {
-                  chain: selectedChain,
-                  sellToken: effectiveSell,
-                  buyToken: normalizedBuy,
-                  balanceUpdates: Array.isArray(writebackPayload?.balanceUpdates)
-                    ? writebackPayload.balanceUpdates
-                    : [],
-                },
-              })
+            // Mark involved tokens as stale due to swap initiation
+            const now = Date.now();
+            const tokensToMarkStale = new Set([effectiveSell, normalizedBuy, gasSymbol]);
+            tokensToMarkStale.forEach((symbol) => {
+              if (symbol) {
+                dispatchBalanceStale({
+                  chainKey: selectedChain,
+                  symbol,
+                  reason: 'swap',
+                  timestamp: now,
+                });
+              }
+            });
+
+            // 4. Wait for confirmation
+            const receipt = await withWaitLogger(
+              {
+                file: 'altair_frontend1/src/lib/useSwap.ts',
+                target: 'sendTransaction.wait',
+                description: `swap transaction confirmation (${providerName})`,
+              },
+              () => tx.wait()
             );
+
+            // 5. Check if transaction succeeded
+            if (receipt && receipt.status === 0) {
+              throw new Error(`Transaction reverted on-chain with ${providerName}`);
+            }
+
+            // 6. Success on-chain. Writeback is bookkeeping only — its failure
+            // must never propagate into the provider retry loop, or we would
+            // re-submit a swap that already confirmed. So we swallow writeback
+            // errors here and still report success to the caller. Balances will
+            // self-heal via the normal post-swap polling.
+            try {
+              await withWaitLogger(
+                {
+                  file: 'altair_frontend1/src/lib/useSwap.ts',
+                  target: '/api/test-swap writeback',
+                  description: 'swap writeback after confirmation',
+                },
+                async () => {
+                  const writebackRes = await fetch(`${getBackendBaseUrl()}/api/test-swap`, {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+                    },
+                    credentials: 'include',
+                    body: JSON.stringify({
+                      chain: selectedChain,
+                      sellToken: effectiveSell,
+                      buyToken: normalizedBuy,
+                      amount: sellAmount,
+                      recipient,
+                      CID: CID ?? null,
+                      txHash: tx.hash,
+                      integratorFee: routePayload.integratorFee ?? null,
+                      balanceSnapshots: {
+                        sellTokenBeforeRaw: sellSnapshot.raw,
+                        buyTokenBeforeRaw: buySnapshot.raw,
+                        gasTokenBeforeRaw: gasSnapshot.raw,
+                        gasTokenSymbol: gasSymbol,
+                        gasTokenDecimals: gasSnapshot.decimals,
+                      },
+                    }),
+                  });
+                  const writebackPayload = await writebackRes.json().catch(() => ({} as {
+                    error?: string;
+                    balanceUpdates?: Array<{ chain: ChainKey; symbol: string; balanceAfterRaw: string | null; decimals: number }>;
+                  }));
+                  if (!writebackRes.ok) {
+                    throw new Error(
+                      typeof writebackPayload?.error === 'string'
+                        ? writebackPayload.error
+                        : 'Swap writeback failed'
+                    );
+                  }
+
+                  if (typeof window !== 'undefined') {
+                    window.dispatchEvent(
+                      new CustomEvent('altair:swap-complete', {
+                        detail: {
+                          chain: selectedChain,
+                          sellToken: effectiveSell,
+                          buyToken: normalizedBuy,
+                          txHash: tx.hash,
+                          intentId: CID ?? null,
+                          balanceUpdates: Array.isArray(writebackPayload?.balanceUpdates)
+                            ? writebackPayload.balanceUpdates
+                            : [],
+                        },
+                      })
+                    );
+                  }
+                }
+              );
+            } catch (writebackErr) {
+              console.error('[useSwap] writeback failed after confirmed swap (non-fatal)', writebackErr);
+              // Still emit swap-complete so the panel transitions out of pending.
+              // Empty balanceUpdates makes the chat handler fall back to its
+              // snapshot-based buy-amount derivation.
+              if (typeof window !== 'undefined') {
+                window.dispatchEvent(
+                  new CustomEvent('altair:swap-complete', {
+                    detail: {
+                      chain: selectedChain,
+                      sellToken: effectiveSell,
+                      buyToken: normalizedBuy,
+                      txHash: tx.hash,
+                      intentId: CID ?? null,
+                      balanceUpdates: [],
+                    },
+                  })
+                );
+              }
+            }
+            
+            console.log(`[useSwap] Swap succeeded with ${providerName}`);
+            return tx.hash as string;
+            
+          } catch (error) {
+            console.error(`[useSwap] Swap failed with ${providerName}:`, error);
+            lastError = error instanceof Error ? error : new Error(String(error));
+            
+            // Determine if we should retry with next provider
+            if (shouldRetryWithNextProvider(error)) {
+              console.log(`[useSwap] Error is retryable, will try next provider`);
+              continue; // Try next provider
+            } else {
+              console.log(`[useSwap] Error is not retryable, failing immediately`);
+              throw error; // Fatal error, don't retry
+            }
           }
         }
-      );
-      return tx.hash as string;
+      }
+      
+      // All providers failed
+      throw lastError || new Error('All swap providers failed');
     });
 };

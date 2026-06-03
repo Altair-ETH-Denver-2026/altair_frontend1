@@ -2,7 +2,7 @@
 
 import React from 'react';
 import Image from 'next/image';
-import { Wallet, Check } from 'lucide-react';
+import { Wallet, Check, Coins, ListOrdered } from 'lucide-react';
 import type { ChainKey } from '../../../config/blockchain_config';
 import Panel from '../Panel';
 import { SpinningLogo } from '../SpinningLogo';
@@ -58,6 +58,12 @@ type AddPanelProps = {
   onHoverEnd: () => void;
   onClose: () => void;
   onSelectChain: (chainKey: ChainKey | 'ALL') => void;
+  /** Optional: open the Lend panel from AddPanel */
+  onOpenLend?: () => void;
+  isLendOpen?: boolean;
+  /** Optional: open the Limit Orders panel from AddPanel */
+  onOpenLimitOrders?: () => void;
+  isLimitOrdersOpen?: boolean;
 };
 
 export default function AddPanel({
@@ -106,6 +112,10 @@ export default function AddPanel({
   onHoverEnd,
   onClose,
   onSelectChain,
+  onOpenLend,
+  isLendOpen = false,
+  onOpenLimitOrders,
+  isLimitOrdersOpen = false,
 }: AddPanelProps) {
   const resolveIconBorderStyle = (
     borderPosition: string,
@@ -187,6 +197,60 @@ export default function AddPanel({
             />
           </span>
         </button>
+        {/* Lend panel toggle */}
+        {onOpenLend ? (
+          <button
+            type="button"
+            onClick={onOpenLend}
+            title="Lend (Jupiter Earn · Solana)"
+            className="inline-flex items-center justify-center cursor-pointer pointer-events-auto"
+          >
+            <span
+              className="flex items-center justify-center rounded-full border transition-colors"
+              style={{
+                width: `${iconContainerSize}px`,
+                height: `${iconContainerSize}px`,
+                backgroundColor: iconButtons.container_color,
+                borderColor: isLendOpen ? iconButtons.highlight_color : iconButtons.border_color,
+                borderWidth: `${iconBorderWidth}px`,
+                boxSizing: 'content-box',
+              }}
+            >
+              <Coins
+                color={isLendOpen ? iconButtons.highlight_color : iconButtons.icon_color}
+                style={{ width: `${iconSize}px`, height: `${iconSize}px` }}
+              />
+            </span>
+          </button>
+        ) : null}
+
+        {/* Limit Orders panel toggle */}
+        {onOpenLimitOrders ? (
+          <button
+            type="button"
+            onClick={onOpenLimitOrders}
+            title="Limit Orders (Jupiter Trigger · Solana)"
+            className="inline-flex items-center justify-center cursor-pointer pointer-events-auto"
+          >
+            <span
+              className="flex items-center justify-center rounded-full border transition-colors"
+              style={{
+                width: `${iconContainerSize}px`,
+                height: `${iconContainerSize}px`,
+                backgroundColor: iconButtons.container_color,
+                borderColor: isLimitOrdersOpen ? iconButtons.highlight_color : iconButtons.border_color,
+                borderWidth: `${iconBorderWidth}px`,
+                boxSizing: 'content-box',
+              }}
+            >
+              <ListOrdered
+                color={isLimitOrdersOpen ? iconButtons.highlight_color : iconButtons.icon_color}
+                style={{ width: `${iconSize}px`, height: `${iconSize}px` }}
+              />
+            </span>
+          </button>
+        ) : null}
+
         {isChainOpen && (
           <div
             className="absolute left-1/2 top-full z-[120] -translate-x-1/2 rounded-xl border border-gray-500 shadow-2xl pointer-events-auto overflow-hidden"

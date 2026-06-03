@@ -1,9 +1,12 @@
 'use client';
 
+import { useEffect } from 'react';
 import { PrivyProvider } from '@privy-io/react-auth';
 import { toSolanaWalletConnectors } from '@privy-io/react-auth/solana';
 import { createSolanaRpc, createSolanaRpcSubscriptions, mainnet as solanaMainnet } from '@solana/kit';
 import { base, baseSepolia, mainnet, sepolia } from 'viem/chains';
+import { getBackendBaseUrl } from '../lib/backendUrl';
+import { PRICE_RULES } from '../../config/blockchain_config';
 
 const SOLANA_RPC_HTTP = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
 const SOLANA_RPC_WS =
@@ -20,6 +23,19 @@ export default function Providers({ children }: { children: React.ReactNode }) {
   if (!appId) {
     throw new Error('Missing NEXT_PUBLIC_PRIVY_APP_ID (or PRIVY_APP_ID) environment variable');
   }
+
+  // Page-mount price refresh ping. Gated on PRICE_RULES.fetchAllConditions.refresh —
+  // when false, no ping fires on mount/reload/reopen. The backend short-circuits when
+  // not in setInterval mode (cron-job.org is authoritative on dev/prod), so this is
+  // effectively a no-op outside localhost even when refresh=true. Fire-and-forget;
+  // failures here must not affect provider rendering.
+  useEffect(() => {
+    if (!PRICE_RULES.fetchAllConditions.refresh) return;
+    const url = `${getBackendBaseUrl()}/api/prices/check-freshness`;
+    fetch(url, { method: 'POST', credentials: 'include' }).catch((err) => {
+      console.warn('[providers] price freshness ping failed', err);
+    });
+  }, []);
 
   return (
     <PrivyProvider

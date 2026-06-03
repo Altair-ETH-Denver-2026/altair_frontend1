@@ -14,6 +14,10 @@ export type ApiTokenBalance = {
   isStale?: boolean; // NEW: indicates if this token balance is stale
   staleReason?: 'swap' | 'timer' | 'manual'; // NEW: why it became stale
   staleSince?: number; // NEW: timestamp when it became stale
+  // USD price for this token, looked up from the `tokens` collection by the
+  // backend balances API. `null` means a row exists but no price yet;
+  // `undefined` means no lookup has been performed.
+  price?: number | null;
 };
 
 export type ApiChainBalances = {
