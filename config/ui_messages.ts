@@ -470,6 +470,8 @@ export const LIMIT_ORDER_CANCELED = [
   'Canceled. No harm done.',
   'Order taken down.',
   'Removed from the queue.',
+];
+
 export const LEND_DEPOSIT_SUBMITTED = [
   'Lend deposit submitted.',
   'Your deposit is on its way to the lending vault.',

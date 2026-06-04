@@ -153,25 +153,6 @@ export default function Chat() {
     return null;
   };
 
-  /**
-   * Generic intent extractor. Returns either a swap intent OR a limit-order intent.
-   * Used for routing: any actionable intent → CONFIRM button row.
-   */
-  const extractAnyIntent = (text: string): ChatActionableIntent | null => {
-    const parsed = extractSwapIntent(text) as unknown as Record<string, unknown> | null;
-    if (!parsed || typeof parsed !== 'object') return null;
-    if (isLimitOrderIntent(parsed)) return parsed as ChatLimitOrderIntent;
-    if (
-      parsed.type === 'SINGLE_CHAIN_SWAP_INTENT' ||
-      parsed.type === 'CROSS_CHAIN_SWAP_INTENT' ||
-      parsed.type === 'BRIDGE_INTENT'
-    ) {
-      return parsed as unknown as ChatSwapIntent;
-    }
-    return null;
-  };
-
-  const extractIntentJsonSlice = (text: string): { intent: SwapIntent; start: number; end: number } | null => {
   /** Back-compat wrapper that only returns swap-shaped intents (lend intents are filtered out). */
   const extractSwapIntent = (text: string): SwapIntent | null => {
     const intent = extractAnyIntent(text);
@@ -1237,14 +1218,6 @@ export default function Chat() {
     try {
       const data = await requestChatResponse({ userMessage, history: historySnapshot, clientRequestId });
       const anyIntent = extractAnyIntent(data.content);
-      const limitOrderIntent = isLimitOrderIntent(anyIntent) ? (anyIntent as ChatLimitOrderIntent) : null;
-      // Swap intent only (limit orders shouldn't go through the swap auto-exec path).
-      const intent = limitOrderIntent ? null : (anyIntent as SwapIntent | null);
-
-      // Dispatch swap-initiated event when AI generates a swap intent
-      if (intent && intent.type) {
-        const selectedChain = resolveIntentChain(intent);
-        
       const swapIntent = anyIntent && !isLendIntent(anyIntent) ? (anyIntent as ChatSwapIntent) : null;
 
       // Dispatch swap-initiated event only for swap-shaped intents (lend uses its own events)
@@ -1284,7 +1257,6 @@ export default function Chat() {
       const chatButtonRow = executionNote
         ? null
         : buildChatButtonRowFromIntent({
-            intent: limitOrderIntent ?? intent,
             intent: anyIntent,
             cid: data?.cid ?? null,
           });

@@ -73,7 +73,6 @@ const resolveTokenLabel = (intent: ChatActionableIntent): string => {
   if (isLimitOrderIntent(intent)) {
     return String(intent.side === 'SELL' ? intent.sell : intent.buy ?? intent.sell ?? 'TOKEN').toUpperCase();
   }
-  return String(intent.buy ?? intent.sell ?? 'TOKEN').toUpperCase();
   if (isLendIntent(intent)) {
     return String(intent.token ?? 'TOKEN').toUpperCase();
   }
@@ -147,18 +146,6 @@ export const buildChatButtonRowFromIntent = (params: {
   intent: ChatActionableIntent | null;
   cid?: string | null;
 }): ChatButtonRowModel | null => {
-  if (isLimitOrderIntent(params.intent)) {
-    return CHAT_BUTTON_ROW_TEMPLATES.CONFIRM_LIMIT_ORDER({
-      intent: params.intent,
-      cid: params.cid ?? null,
-    });
-  }
-  if (!isSwapIntent(params.intent)) return null;
-  return CHAT_BUTTON_ROW_TEMPLATES.CONFIRM_SWAP({
-    intent: params.intent,
-    cid: params.cid ?? null,
-  });
-};
   const intent = params.intent;
   if (!intent) return null;
 
@@ -166,6 +153,13 @@ export const buildChatButtonRowFromIntent = (params: {
     const templateKey: ChatButtonRowTemplateKey =
       intent.type === 'LEND_DEPOSIT_INTENT' ? 'CONFIRM_LEND_DEPOSIT' : 'CONFIRM_LEND_WITHDRAW';
     return CHAT_BUTTON_ROW_TEMPLATES[templateKey]({
+      intent,
+      cid: params.cid ?? null,
+    });
+  }
+
+  if (isLimitOrderIntent(intent)) {
+    return CHAT_BUTTON_ROW_TEMPLATES.CONFIRM_LIMIT_ORDER({
       intent,
       cid: params.cid ?? null,
     });

@@ -291,8 +291,6 @@ export const SYSTEM_PROMPT = {
       ${INTENTS.LIMIT_ORDER_INTENTS.LIMIT_ORDER_PRICE_INTENT}
       ${INTENTS.LIMIT_ORDER_INTENTS.LIMIT_ORDER_TIME_INTENT}
 
-      Use the user memory context as helpful background, but prioritize the latest user message if there is any conflict.
-    `, // core system instruction that defines Altair's trading-assistant persona and swap + limit-order intent protocol
       ${INTENTS.LEND_INTENTS.LEND_DEPOSIT_INTENT}
       ${INTENTS.LEND_INTENTS.LEND_WITHDRAW_INTENT}
 
@@ -318,6 +316,7 @@ export const SYSTEM_PROMPT = {
     limitOrdersBlock: {
       withData: `\nActive Limit Orders (MongoDB snapshot; may be stale):\n\${JSON.stringify(limitOrdersContext)}`, // active price- and time-triggered orders for follow-up (cancel / status questions)
       empty: '\nActive Limit Orders: none available yet.', // fallback when user has no open orders
+    },
     lendMarketsBlock: {
       withData: `\nLend Markets (Jupiter Lend Earn on Solana; may be stale):\n\${JSON.stringify(lendMarketsContext)}`, // injected list of supported lend tokens + APYs so the model can quote rates
       empty: '\nLend Markets: none available yet.', // fallback when Lend tokens are unavailable
