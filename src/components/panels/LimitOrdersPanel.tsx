@@ -92,16 +92,18 @@ export default function LimitOrdersPanel({ width, onClose }: LimitOrdersPanelPro
           </div>
         ) : (
           <div className="flex flex-col gap-1.5">
-            {orders.map((order) => {
+            {orders.map((order, index) => {
               const sellSym = order.sellToken?.symbol ?? '';
               const buySym = order.buyToken?.symbol ?? '';
               const sellAmt = formatUnits(order.sellToken?.amount, order.sellToken?.decimals ?? 0);
               const buyAmt = formatUnits(order.buyToken?.amount, order.buyToken?.decimals ?? 0);
               const trigger = formatTrigger(order);
               const isCancelling = cancellingLOID === order.LOID;
+              const orderKey =
+                (typeof order.LOID === 'string' && order.LOID) || `order-${index}`;
               return (
                 <div
-                  key={order.LOID}
+                  key={orderKey}
                   className="flex items-center justify-between rounded-md border border-gray-700 bg-gray-800/40 px-2 py-1.5"
                 >
                   <div className="min-w-0">

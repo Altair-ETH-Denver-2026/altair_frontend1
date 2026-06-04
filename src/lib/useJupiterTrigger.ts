@@ -6,6 +6,7 @@ import { usePrivy } from '@privy-io/react-auth';
 import { useWallets, useSignAndSendTransaction } from '@privy-io/react-auth/solana';
 import { withWaitLogger } from './waitLogger';
 import { dispatchBalanceStale } from './eventTypes';
+import { getBackendBaseUrl } from './backendUrl';
 import * as SolanaTokens from '../../config/token_info/solana_tokens';
 import type { ChatLimitOrderIntent } from './limitOrderTypes';
 
@@ -119,7 +120,7 @@ export function useJupiterTrigger() {
       // For amountOutRaw on a scheduled market order we don't know yet; record 0
       // and let the scheduler/writeback patch it after fill.
       const amountOutRaw = '0';
-      const writebackRes = await fetch('/api/limit-orders', {
+      const writebackRes = await fetch(`${getBackendBaseUrl()}/api/limit-orders`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -214,7 +215,7 @@ export function useJupiterTrigger() {
         description: 'Jupiter Trigger create-order build tx',
       },
       () =>
-        fetch('/api/jupiter/trigger/create-order', {
+        fetch(`${getBackendBaseUrl()}/api/jupiter/trigger/create-order`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -299,7 +300,7 @@ export function useJupiterTrigger() {
     // so we use the create-order tx signature as our local providerOrderId until V2.
     let LOID: string | null = null;
     try {
-      const writebackRes = await fetch('/api/limit-orders', {
+      const writebackRes = await fetch(`${getBackendBaseUrl()}/api/limit-orders`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

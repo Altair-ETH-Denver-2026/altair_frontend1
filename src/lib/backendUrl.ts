@@ -14,7 +14,16 @@ const getHostFromUrl = (value: string | undefined): string | null => {
   }
 };
 
+// In the browser we deliberately return '' so fetch('/api/...') stays same-origin
+// and Next.js rewrites in next.config.ts handle proxying to the right backend per
+// host. Returning an absolute URL would force CORS preflights and break local dev
+// unless the backend is running and CORS env vars are perfectly aligned.
+//
+// On the server (SSR / Node) we fall back to an absolute URL because there is no
+// browser origin to be relative to.
 export const getBackendBaseUrl = (): string => {
+  if (typeof window !== 'undefined') return '';
+
   const override = process.env.NEXT_PUBLIC_BACKEND_URL_OVERRIDE?.trim();
   if (override) return override;
 
@@ -28,19 +37,12 @@ export const getBackendBaseUrl = (): string => {
   const prodHost = getHostFromUrl(prodFrontendUrl) ?? 'askaltair.com';
   const vercelHost = process.env.VERCEL_URL ? normalizeHost(process.env.VERCEL_URL) : null;
 
-  if (typeof window !== 'undefined') {
-    const host = normalizeHost(window.location.host);
-    if (host === 'localhost:3000') return localBackend;
-    if (host.endsWith('.vercel.app')) return devBackend;
-    if (host === prodHost) return prodBackend;
-  } else if (process.env.NODE_ENV === 'development') {
-    return localBackend;
-  } else if (vercelHost) {
+  if (process.env.NODE_ENV === 'development') return localBackend;
+  if (vercelHost) {
     if (vercelHost.endsWith('.vercel.app')) return devBackend;
     if (vercelHost === prodHost) return prodBackend;
-  } else if (process.env.VERCEL_ENV === 'preview') {
-    return devBackend;
   }
+  if (process.env.VERCEL_ENV === 'preview') return devBackend;
 
   return prodBackend;
 };

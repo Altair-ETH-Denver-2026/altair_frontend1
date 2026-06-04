@@ -9,7 +9,8 @@ export const LLM_MODELS = {
     //  'llama-3.1-8b-instant',
      'grok-4-fast',
      'grok-4',
-     'gpt-4o-mini'], // model fallback order for generating running chat summaries in Altair
+     'gpt-4o-mini',
+     'llama-3.1-8b-instant'], // model fallback order for generating running chat summaries in Altair
   mainChat: [
     //  'llama-3.3-70b-versatile',
     //  'qwen3-32b',
@@ -92,12 +93,6 @@ export const INTENTS = {
     BRIDGE_INTENT: `If the user wants to bridge a token (same token across chains), return JSON:
       { "type": "BRIDGE_INTENT", "sell": "<SELL_TOKEN>", "amount": "<AMOUNT>", "sellTokenChain": "<SELL_TOKEN_CHAIN>", "buyTokenChain": "<BUY_TOKEN_CHAIN>" }`,
   },
-  LEND_INTENTS: {
-    LEND_DEPOSIT_INTENT: `If the user wants to deposit a token into a Jupiter Lend (Earn) vault to earn yield on Solana, return JSON:
-      { "type": "LEND_DEPOSIT_INTENT", "token": "<TOKEN>", "amount": "<AMOUNT>", "tokenChain": "SOLANA_MAINNET", "provider": "Jupiter" }`,
-    LEND_WITHDRAW_INTENT: `If the user wants to withdraw lent funds from a Jupiter Lend (Earn) vault, return JSON. Use "amount": "all" to withdraw the full position:
-      { "type": "LEND_WITHDRAW_INTENT", "token": "<TOKEN>", "amount": "<AMOUNT_OR_ALL>", "tokenChain": "SOLANA_MAINNET", "provider": "Jupiter" }`,
-  },
   LIMIT_ORDER_INTENTS: {
     // Price-triggered limit order (Jupiter Trigger API). Today Solana-only.
     // The order fires when the market price reaches the user's targetPrice (or the implied
@@ -111,6 +106,13 @@ export const INTENTS = {
   // DEFI_INTENTS {
   //    deposit/withdraw into LP
   //    deposit/withdraw loan}
+  LEND_INTENTS: {
+    LEND_DEPOSIT_INTENT: `If the user wants to deposit a token into a Jupiter Lend (Earn) vault to earn yield on Solana, return JSON:
+      { "type": "LEND_DEPOSIT_INTENT", "token": "<TOKEN>", "amount": "<AMOUNT>", "tokenChain": "SOLANA_MAINNET", "provider": "Jupiter" }`,
+    LEND_WITHDRAW_INTENT: `If the user wants to withdraw lent funds from a Jupiter Lend (Earn) vault, return JSON. Use "amount": "all" to withdraw the full position:
+      { "type": "LEND_WITHDRAW_INTENT", "token": "<TOKEN>", "amount": "<AMOUNT_OR_ALL>", "tokenChain": "SOLANA_MAINNET", "provider": "Jupiter" }`,
+  },
+  // LIMIT_ORDER_INTENTS (next feature): price-trigger via Jupiter Trigger API; date-trigger via Altair scheduler.
   // UI_INTENTS {
   //    BUTTONS}
 };

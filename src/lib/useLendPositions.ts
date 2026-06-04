@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { usePrivy } from '@privy-io/react-auth';
 import { useWallets } from '@privy-io/react-auth/solana';
 import { isSwapCompleteEvent } from './eventTypes';
+import { getBackendBaseUrl } from './backendUrl';
 
 export type LendMarket = {
   asset?: string;
@@ -47,6 +48,22 @@ type FetchState = {
 
 const REFRESH_THROTTLE_MS = 4_000;
 
+// Jupiter's lend endpoints occasionally return `asset` as an object
+// (e.g. { address, chainId, ... }) instead of the plain mint string the rest of
+// the app expects. Normalize at the network boundary so downstream code, React
+// keys, and Map<string, ...> lookups all get a real string.
+const toMintString = (raw: unknown): string | undefined => {
+  if (typeof raw === 'string') return raw || undefined;
+  if (raw && typeof raw === 'object') {
+    const r = raw as Record<string, unknown>;
+    for (const k of ['address', 'mint', 'id']) {
+      const v = r[k];
+      if (typeof v === 'string' && v) return v;
+    }
+  }
+  return undefined;
+};
+
 const lendPositionFingerprint = (rows: LendPositionRow[]): string =>
   rows
     .map((p) => `${p.LPID ?? ''}:${p.principalRaw ?? '0'}:${p.shares ?? '0'}:${p.underlyingAmountRaw ?? ''}`)
@@ -83,43 +100,78 @@ export function useLendPositions(opts: { enabled?: boolean } = {}) {
     setState((prev) => ({ ...prev, loading: true, error: null }));
     try {
       const accessToken = await getAccessToken();
+      const backend = getBackendBaseUrl();
       const [marketsRes, mongoRes, jupPositionsRes, earningsRes] = await Promise.all([
-        fetch('/api/jupiter/lend/tokens').then((r) => (r.ok ? r.json() : { tokens: [] })),
-        fetch(`/api/lend-positions?wallet=${encodeURIComponent(solanaAddress)}`, {
+        fetch(`${backend}/api/jupiter/lend/tokens`).then((r) => (r.ok ? r.json() : { tokens: [] })),
+        fetch(`${backend}/api/lend-positions?wallet=${encodeURIComponent(solanaAddress)}`, {
           headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
         }).then((r) => (r.ok ? r.json() : { positions: [] })),
-        fetch(`/api/jupiter/lend/positions?wallet=${encodeURIComponent(solanaAddress)}`)
+        fetch(`${backend}/api/jupiter/lend/positions?wallet=${encodeURIComponent(solanaAddress)}`)
           .then((r) => (r.ok ? r.json() : { positions: [] })),
-        fetch(`/api/jupiter/lend/earnings?wallet=${encodeURIComponent(solanaAddress)}`)
+        fetch(`${backend}/api/jupiter/lend/earnings?wallet=${encodeURIComponent(solanaAddress)}`)
           .then((r) => (r.ok ? r.json() : { earnings: [] })),
       ]);
 
-      const markets: LendMarket[] = Array.isArray(marketsRes)
+      const rawMarkets: Array<LendMarket & { asset?: unknown }> = Array.isArray(marketsRes)
         ? marketsRes
         : Array.isArray(marketsRes?.tokens)
           ? marketsRes.tokens
           : [];
+      const markets: LendMarket[] = rawMarkets.map((m) => ({
+        ...m,
+        asset: toMintString(m.asset),
+      }));
       const mongoPositions: LendPositionRow[] = Array.isArray(mongoRes?.positions)
         ? mongoRes.positions
         : [];
+      type JupPositionRaw = {
+        asset?: unknown;
+        symbol?: string;
+        shares?: string;
+        underlyingAmount?: string;
+        apy?: number;
+      };
+      const rawJupPositions: JupPositionRaw[] = Array.isArray(jupPositionsRes?.positions)
+        ? jupPositionsRes.positions
+        : Array.isArray(jupPositionsRes)
+          ? jupPositionsRes
+          : [];
       const jupPositions: Array<{
         asset?: string;
         symbol?: string;
         shares?: string;
         underlyingAmount?: string;
         apy?: number;
-      }> = Array.isArray(jupPositionsRes?.positions)
-        ? jupPositionsRes.positions
-        : Array.isArray(jupPositionsRes)
-          ? jupPositionsRes
-          : [];
-      const earnings: Array<{ asset?: string; symbol?: string; earningsRaw?: string }> = Array.isArray(
+      }> = rawJupPositions.map((p) => ({
+        ...p,
+        asset: toMintString(p.asset),
+      }));
+      const rawEarnings: Array<{ asset?: unknown; symbol?: string; earningsRaw?: string }> = Array.isArray(
         earningsRes?.earnings
       )
         ? earningsRes.earnings
         : Array.isArray(earningsRes)
           ? earningsRes
           : [];
+      const earnings: Array<{ asset?: string; symbol?: string; earningsRaw?: string }> = rawEarnings.map((e) => ({
+        ...e,
+        asset: toMintString(e.asset),
+      }));
+
+      // Build a quick market APY lookup by mint address and symbol for position enrichment.
+      const marketApyByMint = new Map<string, number>();
+      const marketApyBySym = new Map<string, number>();
+      for (const m of markets) {
+        const apy = typeof m.apy === 'number' ? m.apy : null;
+        if (apy == null) continue;
+        if (m.asset) marketApyByMint.set(m.asset, apy);
+        if (m.symbol) marketApyBySym.set(m.symbol.toUpperCase(), apy);
+      }
+      const resolveApy = (mint?: string, sym?: string, fallback?: number | null): number | null => {
+        if (mint && marketApyByMint.has(mint)) return marketApyByMint.get(mint)!;
+        if (sym && marketApyBySym.has(sym.toUpperCase())) return marketApyBySym.get(sym.toUpperCase())!;
+        return fallback ?? null;
+      };
 
       // Merge Jupiter live data into Mongo rows; surface Jupiter-only positions too.
       const seenLPIDs = new Set<string>();
@@ -139,7 +191,8 @@ export function useLendPositions(opts: { enabled?: boolean } = {}) {
           ...row,
           underlyingAmountRaw: livePos?.underlyingAmount ?? null,
           shares: livePos?.shares ?? row.shares ?? '0',
-          apySnapshot: typeof livePos?.apy === 'number' ? livePos.apy : row.apySnapshot ?? null,
+          // Prefer live position APY, then fall back to the normalised market APY we computed above.
+          apySnapshot: resolveApy(mint, sym, typeof livePos?.apy === 'number' ? livePos.apy : row.apySnapshot),
           earningsRaw: earn?.earningsRaw ?? null,
         };
       });
@@ -162,7 +215,7 @@ export function useLendPositions(opts: { enabled?: boolean } = {}) {
           token: { symbol: sym, contractAddress: p.asset },
           shares: p.shares ?? '0',
           underlyingAmountRaw: p.underlyingAmount ?? null,
-          apySnapshot: typeof p.apy === 'number' ? p.apy : null,
+          apySnapshot: resolveApy(p.asset, sym, typeof p.apy === 'number' ? p.apy : null),
           earningsRaw: earn?.earningsRaw ?? null,
           status: 'active',
         });

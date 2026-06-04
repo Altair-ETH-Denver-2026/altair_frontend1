@@ -5,6 +5,22 @@ import type { ChainKey } from '../../config/blockchain_config';
 
 export type WalletPanelState = { id: number; chainKey: ChainKey | 'ALL'; isChainOpen: boolean };
 
+export type TransactionInfoPanelState = {
+  id: number;
+  intentId: string | null;
+  txKey: string | null;
+  txHash: string | null;
+  sellChain: ChainKey;
+  buyChain: ChainKey;
+  sellToken: string;
+  buyToken: string;
+  sellAmount: string;
+  buyAmount: string | null;
+  buyBalanceBeforeRaw: string | null;
+  buyTokenDecimals: number | null;
+  status: 'pending' | 'complete';
+};
+
 export type UsePanelsParams = {
   initialChain: ChainKey;
 };
@@ -30,6 +46,16 @@ export type UsePanelsResult = {
   initWalletPanels: () => void;
   closeWalletPanel: (panelId: number, onCloseLast?: () => void) => void;
   addWalletPanel: (chainKey: ChainKey | 'ALL') => number;
+  transactionInfoPanels: TransactionInfoPanelState[];
+  setTransactionInfoPanels: Dispatch<SetStateAction<TransactionInfoPanelState[]>>;
+  addTransactionInfoPanel: (data: Omit<TransactionInfoPanelState, 'id'>) => number;
+  updateTransactionInfoPanel: (
+    matcher: (panel: TransactionInfoPanelState) => boolean,
+    updates:
+      | Partial<Omit<TransactionInfoPanelState, 'id'>>
+      | ((panel: TransactionInfoPanelState) => Partial<Omit<TransactionInfoPanelState, 'id'>>)
+  ) => void;
+  closeTransactionInfoPanel: (panelId: number) => void;
 };
 
 export const usePanels = ({ initialChain }: UsePanelsParams): UsePanelsResult => {
@@ -42,6 +68,8 @@ export const usePanels = ({ initialChain }: UsePanelsParams): UsePanelsResult =>
   const [walletPanelHasCustomChain, setWalletPanelHasCustomChain] = useState(false);
   const [addPanelHasCustomChain, setAddPanelHasCustomChain] = useState(false);
   const [addPanelIconHovered, setAddPanelIconHovered] = useState(false);
+  const [transactionInfoPanels, setTransactionInfoPanels] = useState<TransactionInfoPanelState[]>([]);
+  const transactionInfoPanelIdRef = useRef(0);
 
   const initWalletPanels = () => {
     const nextId = walletPanelIdRef.current + 1;
@@ -89,6 +117,34 @@ export const usePanels = ({ initialChain }: UsePanelsParams): UsePanelsResult =>
     return nextId;
   };
 
+  const addTransactionInfoPanel = (data: Omit<TransactionInfoPanelState, 'id'>) => {
+    const nextId = transactionInfoPanelIdRef.current + 1;
+    transactionInfoPanelIdRef.current = nextId;
+    setTransactionInfoPanels((current) => [...current, { ...data, id: nextId }]);
+    return nextId;
+  };
+
+  const updateTransactionInfoPanel = (
+    matcher: (panel: TransactionInfoPanelState) => boolean,
+    updates:
+      | Partial<Omit<TransactionInfoPanelState, 'id'>>
+      | ((panel: TransactionInfoPanelState) => Partial<Omit<TransactionInfoPanelState, 'id'>>)
+  ) => {
+    setTransactionInfoPanels((current) => {
+      const matchedIndex = current.findIndex(matcher);
+      if (matchedIndex === -1) return current;
+      const matched = current[matchedIndex];
+      const resolved = typeof updates === 'function' ? updates(matched) : updates;
+      const next = current.slice();
+      next[matchedIndex] = { ...matched, ...resolved };
+      return next;
+    });
+  };
+
+  const closeTransactionInfoPanel = (panelId: number) => {
+    setTransactionInfoPanels((current) => current.filter((entry) => entry.id !== panelId));
+  };
+
   return {
     walletPanels,
     setWalletPanels,
@@ -110,5 +166,10 @@ export const usePanels = ({ initialChain }: UsePanelsParams): UsePanelsResult =>
     initWalletPanels,
     closeWalletPanel,
     addWalletPanel,
+    transactionInfoPanels,
+    setTransactionInfoPanels,
+    addTransactionInfoPanel,
+    updateTransactionInfoPanel,
+    closeTransactionInfoPanel,
   };
 };
