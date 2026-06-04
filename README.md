@@ -60,9 +60,19 @@ Wallet display mode is configured in [`config/ui_config.ts`](config/ui_config.ts
 - Solana swap: [`src/lib/useSolanaSwap.ts`](src/lib/useSolanaSwap.ts)
 - Solana transfer: [`src/lib/useSolanaTransfer.ts`](src/lib/useSolanaTransfer.ts)
 - Cross-chain relay: [`src/lib/useRelay.ts`](src/lib/useRelay.ts)
+- Jupiter Trigger (limit / scheduled orders): [`src/lib/useJupiterTrigger.ts`](src/lib/useJupiterTrigger.ts)
 - Jupiter Lend (Earn) deposit/withdraw: [`src/lib/useJupiterLend.ts`](src/lib/useJupiterLend.ts)
 
-These hooks execute chain actions and emit `altair:swap-complete` to drive wallet/balance UI updates.
+These hooks execute chain actions and emit `altair:swap-complete` (or `altair:balance-stale`) to drive wallet/balance UI updates.
+
+### 4) Limit orders (Jupiter Trigger · Solana)
+
+When the user says "sell 100 BONK if price hits $0.00003" or "swap 1 SOL to USDC at 6pm tomorrow", the chat model emits a `LIMIT_ORDER_PRICE_INTENT` or `LIMIT_ORDER_TIME_INTENT` (see `INTENTS.LIMIT_ORDER_INTENTS` in `config/ai_config.ts`). The chat panel renders a Place Order / Cancel row (template `CONFIRM_LIMIT_ORDER`). On confirm, [`useJupiterTrigger.executeLimitOrder(...)`](src/lib/useJupiterTrigger.ts):
+
+- For **price** orders: calls the Jupiter Trigger V1 proxy `/api/jupiter/trigger/create-order`, Privy signs+sends the order tx, then the frontend writes back to `/api/limit-orders` with the trigger config.
+- For **time** orders: skips Jupiter (the server-side scheduler is a follow-up) and only writes back to `/api/limit-orders` so the order is tracked and the chat model can remind the user about it.
+
+The **LimitOrdersPanel** ([`src/components/panels/LimitOrdersPanel.tsx`](src/components/panels/LimitOrdersPanel.tsx)) shows pending orders for the connected Solana wallet and lets the user cancel them. Open it via the **List** icon in the top menu (next to the wallet panel). Today this lists Altair's Mongo-tracked orders; cross-referencing with `/api/jupiter/trigger/orders` for fill status is a follow-up.
 
 ### 4) Jupiter Lend (Earn) chat flow
 

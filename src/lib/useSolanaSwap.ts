@@ -194,26 +194,14 @@ export function useSolanaSwap(explicitChain?: ChainKey) {
       throw new Error(`Solana swap preflight failed: ${JSON.stringify(simErr)}${joinedLogs}`);
     }
 
-    try {
-      const { signature } = await withWaitLogger(
-        {
-          file: 'altair_frontend1/src/lib/useSolanaSwap.ts',
-          target: 'Privy signAndSendTransaction',
-          description: 'Solana swap signing and submission',
-        },
-        () =>
-          signAndSendTransaction({
-            transaction: serialized,
-            wallet,
-            chain: 'solana:mainnet',
-          })
-      );
-      const txHash = typeof signature === 'string' ? signature : bs58.encode(signature);
-      
-      // Dispatch swap-submitted event
+    // Runs after either the first sign attempt or the blockhash-refresh retry
+    // succeeds, so both paths emit the same submitted/writeback/complete events.
+    // Writeback failures are non-fatal — the on-chain swap already happened.
+    const performPostSign = async (txHash: string) => {
       const sellTokenUpper = sellToken.toUpperCase();
       const buyTokenUpper = buyToken.toUpperCase();
       const gasSymbol = (GAS_TOKENS.SOLANA_MAINNET ?? 'SOL').toUpperCase();
+
       dispatchSwapSubmitted({
         sellToken: sellTokenUpper,
         buyToken: buyTokenUpper,
@@ -225,7 +213,6 @@ export function useSolanaSwap(explicitChain?: ChainKey) {
         timestamp: Date.now(),
       });
 
-      // Mark involved tokens as stale due to swap initiation
       const now = Date.now();
       const tokensToMarkStale = new Set([sellTokenUpper, buyTokenUpper, gasSymbol]);
       tokensToMarkStale.forEach((symbol) => {
@@ -255,74 +242,103 @@ export function useSolanaSwap(explicitChain?: ChainKey) {
         symbol: gasSymbol,
       });
 
-      const writebackRes = await withWaitLogger(
-        {
-          file: 'altair_frontend1/src/lib/useSolanaSwap.ts',
-          target: '/api/test-swap writeback',
-          description: 'Solana swap writeback after confirmation',
-        },
-        () =>
-          fetch(`${getBackendBaseUrl()}/api/test-swap`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-            },
-            credentials: 'include',
-            body: JSON.stringify({
-              chain: 'SOLANA_MAINNET',
-              sellToken: sellToken.toUpperCase(),
-              buyToken: buyToken.toUpperCase(),
-              amount: sellAmount,
-              recipient,
-              CID: CID ?? null,
-              txHash,
-              balanceSnapshots: {
-                sellTokenBeforeRaw: sellSnapshot.raw,
-                buyTokenBeforeRaw: buySnapshot.raw,
-                gasTokenBeforeRaw: gasSnapshot.raw,
-                gasTokenSymbol: gasSymbol,
-                gasTokenDecimals: gasSnapshot.decimals,
-              },
-            }),
-          })
-      );
-      const writebackPayload = await writebackRes.json().catch(() => ({} as {
-        error?: string;
-        balanceUpdates?: Array<{ chain: ChainKey; symbol: string; balanceAfterRaw: string | null; decimals: number }>;
-      }));
-      if (!writebackRes.ok) {
-        throw new Error(
-          typeof writebackPayload?.error === 'string'
-            ? writebackPayload.error
-            : 'Solana swap writeback failed'
-        );
-      }
-
-      if (typeof window !== 'undefined') {
+      const emitComplete = (balanceUpdates: unknown) => {
+        if (typeof window === 'undefined') return;
         window.dispatchEvent(
           new CustomEvent('altair:swap-complete', {
             detail: {
               chain: 'SOLANA_MAINNET',
-              sellToken: sellToken.toUpperCase(),
-              buyToken: buyToken.toUpperCase(),
+              sellToken: sellTokenUpper,
+              buyToken: buyTokenUpper,
               txHash,
               intentId: CID ?? null,
-              balanceUpdates: Array.isArray(writebackPayload?.balanceUpdates)
-                ? writebackPayload.balanceUpdates
-                : [],
+              balanceUpdates: Array.isArray(balanceUpdates) ? balanceUpdates : [],
             },
           })
         );
-      }
+      };
 
-      return txHash;
+      try {
+        const writebackRes = await withWaitLogger(
+          {
+            file: 'altair_frontend1/src/lib/useSolanaSwap.ts',
+            target: '/api/test-swap writeback',
+            description: 'Solana swap writeback after confirmation',
+          },
+          () =>
+            fetch(`${getBackendBaseUrl()}/api/test-swap`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+              },
+              credentials: 'include',
+              body: JSON.stringify({
+                chain: 'SOLANA_MAINNET',
+                sellToken: sellTokenUpper,
+                buyToken: buyTokenUpper,
+                amount: sellAmount,
+                recipient,
+                CID: CID ?? null,
+                txHash,
+                balanceSnapshots: {
+                  sellTokenBeforeRaw: sellSnapshot.raw,
+                  buyTokenBeforeRaw: buySnapshot.raw,
+                  gasTokenBeforeRaw: gasSnapshot.raw,
+                  gasTokenSymbol: gasSymbol,
+                  gasTokenDecimals: gasSnapshot.decimals,
+                },
+              }),
+            })
+        );
+        const writebackPayload = await writebackRes.json().catch(() => ({} as {
+          error?: string;
+          balanceUpdates?: Array<{ chain: ChainKey; symbol: string; balanceAfterRaw: string | null; decimals: number }>;
+        }));
+        if (!writebackRes.ok) {
+          throw new Error(
+            typeof writebackPayload?.error === 'string'
+              ? writebackPayload.error
+              : 'Solana swap writeback failed'
+          );
+        }
+        emitComplete(writebackPayload?.balanceUpdates);
+      } catch (writebackErr) {
+        console.error('[Solana Swap] writeback failed after confirmed swap (non-fatal)', writebackErr);
+        emitComplete([]);
+      }
+    };
+
+    let txHash: string;
+    try {
+      const { signature } = await withWaitLogger(
+        {
+          file: 'altair_frontend1/src/lib/useSolanaSwap.ts',
+          target: 'Privy signAndSendTransaction',
+          description: 'Solana swap signing and submission',
+        },
+        () =>
+          signAndSendTransaction({
+            transaction: serialized,
+            wallet,
+            chain: 'solana:mainnet',
+          })
+      );
+      txHash = typeof signature === 'string' ? signature : bs58.encode(signature);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       const errorLogs = extractSimulationLogsFromError(err);
+      // Privy's signAndSendTransaction sometimes rejects with a plain object whose
+      // fields are non-enumerable, which is why the overlay shows {}. Enumerate
+      // own-property names so we always have something to triage against.
+      const errKeys = err && typeof err === 'object'
+        ? Object.getOwnPropertyNames(err as object)
+        : [];
       console.error('[Solana Swap] signAndSendTransaction failed', {
+        name: err instanceof Error ? err.name : null,
         message: msg,
         error: formatUnknownError(err),
+        errorKeys: errKeys,
         logs: errorLogs,
       });
 
@@ -335,6 +351,7 @@ export function useSolanaSwap(explicitChain?: ChainKey) {
           'Solana RPC returned 403 (rate limit). Use a custom RPC: set NEXT_PUBLIC_SOLANA_RPC_URL in .env to a free RPC (e.g. Helius: https://www.helius.dev, QuickNode, Alchemy) and restart the dev server.'
         );
       }
+
       if (msg.includes('signature verification') || msg.includes('signature')) {
         await refreshBlockhash();
         serialized = versionedTx.serialize();
@@ -352,10 +369,13 @@ export function useSolanaSwap(explicitChain?: ChainKey) {
             })
         );
         const retrySig = retry?.signature;
-        const retryHash = typeof retrySig === 'string' ? retrySig : bs58.encode(retrySig);
-        return retryHash;
+        txHash = typeof retrySig === 'string' ? retrySig : bs58.encode(retrySig);
+      } else {
+        throw err;
       }
-      throw err;
     }
+
+    await performPostSign(txHash);
+    return txHash;
   };
 }

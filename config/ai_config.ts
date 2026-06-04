@@ -1,4 +1,5 @@
-import { LEND_DEPOSIT_SUBMITTED, LEND_WITHDRAW_SUBMITTED, SWAP_SUBMITTED } from './ui_messages';
+import { SWAP_SUBMITTED, LIMIT_ORDER_SUBMITTED } from './ui_messages';
+import { LEND_DEPOSIT_SUBMITTED, LEND_WITHDRAW_SUBMITTED } from './ui_messages';
 
 export const LLM_MODELS = {
   runningSummary: [
@@ -93,6 +94,19 @@ export const INTENTS = {
     BRIDGE_INTENT: `If the user wants to bridge a token (same token across chains), return JSON:
       { "type": "BRIDGE_INTENT", "sell": "<SELL_TOKEN>", "amount": "<AMOUNT>", "sellTokenChain": "<SELL_TOKEN_CHAIN>", "buyTokenChain": "<BUY_TOKEN_CHAIN>" }`,
   },
+  LIMIT_ORDER_INTENTS: {
+    // Price-triggered limit order (Jupiter Trigger API). Today Solana-only.
+    // The order fires when the market price reaches the user's targetPrice (or the implied
+    // makingAmount / takingAmount ratio). For sell-side orders the price is "<targetPrice> <quoteCurrency> per <SELL_TOKEN>".
+    LIMIT_ORDER_PRICE_INTENT: `If the user wants to place a price-triggered limit order on Solana (e.g. "sell 100 BONK if price hits $0.00003"), return JSON:
+      { "type": "LIMIT_ORDER_PRICE_INTENT", "side": "<SELL|BUY>", "sell": "<SELL_TOKEN>", "buy": "<BUY_TOKEN>", "amount": "<AMOUNT>", "targetPrice": "<PRICE>", "quoteCurrency": "<USDC|SOL|etc>", "chain": "Solana", "expiry": "<ISO_OR_NULL>" }`,
+    // Time-triggered (DCA-ish single shot). We schedule it server-side and fire a market swap at runAt.
+    LIMIT_ORDER_TIME_INTENT: `If the user wants to schedule a swap at a specific future time (e.g. "swap 1 SOL to USDC at 6pm today"), return JSON:
+      { "type": "LIMIT_ORDER_TIME_INTENT", "side": "<SELL|BUY>", "sell": "<SELL_TOKEN>", "buy": "<BUY_TOKEN>", "amount": "<AMOUNT>", "runAt": "<ISO_TIMESTAMP>", "chain": "Solana" }`,
+  },
+  // DEFI_INTENTS {
+  //    deposit/withdraw into LP
+  //    deposit/withdraw loan}
   LEND_INTENTS: {
     LEND_DEPOSIT_INTENT: `If the user wants to deposit a token into a Jupiter Lend (Earn) vault to earn yield on Solana, return JSON:
       { "type": "LEND_DEPOSIT_INTENT", "token": "<TOKEN>", "amount": "<AMOUNT>", "tokenChain": "SOLANA_MAINNET", "provider": "Jupiter" }`,
@@ -105,6 +119,30 @@ export const INTENTS = {
 };
 
 export const CHAT_BUTTON_ROW_TEMPLATES = {
+  CONFIRM_LIMIT_ORDER: {
+    intentTriggers: ['LIMIT_ORDER_INTENTS'],
+    responseList: LIMIT_ORDER_SUBMITTED,
+    buttons: [
+      {
+        id: 'confirm',
+        label: 'Place Order',
+        action: {
+          kind: 'RUN_LOCAL',
+          actionId: 'CONFIRM_LIMIT_ORDER',
+          presetAssistantMessage: 'Limit order placed.',
+        },
+      },
+      {
+        id: 'cancel',
+        label: 'Cancel',
+        action: {
+          kind: 'RUN_LOCAL',
+          actionId: 'CANCEL_LIMIT_ORDER',
+          presetAssistantMessage: 'Order canceled.',
+        },
+      },
+    ],
+  },
   CONFIRM_SWAP: {
     intentTriggers: ['SWAP_INTENTS'],
     responseList: SWAP_SUBMITTED,
@@ -243,6 +281,16 @@ export const SYSTEM_PROMPT = {
       ${INTENTS.SWAP_INTENTS.SINGLE_CHAIN_SWAP_INTENT}
       ${INTENTS.SWAP_INTENTS.CROSS_CHAIN_SWAP_INTENT}
       ${INTENTS.SWAP_INTENTS.BRIDGE_INTENT}
+
+      Limit / scheduled orders:
+      - Today, limit orders and time-scheduled orders are Solana-only (Jupiter Trigger). If the user asks for a price- or time-triggered order on a non-Solana chain, tell them it isn't supported yet.
+      - If the user wants the trade to wait until a price target (e.g. "sell 100 BONK if it hits $0.00003", "buy SOL when it dips to 140"), emit LIMIT_ORDER_PRICE_INTENT. Always include side (SELL or BUY), the target price, and the currency the price is quoted in (default USDC).
+      - If the user wants the trade to fire at a specific time (e.g. "swap 1 SOL to USDC at 6pm tomorrow"), emit LIMIT_ORDER_TIME_INTENT with an ISO 8601 timestamp in the user's local timezone (assume UTC if not stated). Do not place time-triggered orders more than 30 days out.
+      - Always restate the order in plain English before asking for confirmation. Example: "Place a limit order to sell 100 BONK for USDC if BONK reaches $0.00003. Confirm?"
+
+      ${INTENTS.LIMIT_ORDER_INTENTS.LIMIT_ORDER_PRICE_INTENT}
+      ${INTENTS.LIMIT_ORDER_INTENTS.LIMIT_ORDER_TIME_INTENT}
+
       ${INTENTS.LEND_INTENTS.LEND_DEPOSIT_INTENT}
       ${INTENTS.LEND_INTENTS.LEND_WITHDRAW_INTENT}
 
@@ -264,6 +312,10 @@ export const SYSTEM_PROMPT = {
     swapsBlock: {
       withData: `\nRecent Swaps (last 3 from MongoDB; may be stale):\n\${JSON.stringify(swapHistoryContext)}`, // supplies recent swaps for continuity and safety checks
       empty: '\nRecent Swaps: none available yet.', // fallback when no swap history exists
+    },
+    limitOrdersBlock: {
+      withData: `\nActive Limit Orders (MongoDB snapshot; may be stale):\n\${JSON.stringify(limitOrdersContext)}`, // active price- and time-triggered orders for follow-up (cancel / status questions)
+      empty: '\nActive Limit Orders: none available yet.', // fallback when user has no open orders
     },
     lendMarketsBlock: {
       withData: `\nLend Markets (Jupiter Lend Earn on Solana; may be stale):\n\${JSON.stringify(lendMarketsContext)}`, // injected list of supported lend tokens + APYs so the model can quote rates

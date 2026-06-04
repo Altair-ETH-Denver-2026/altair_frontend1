@@ -13,8 +13,9 @@ import { usePanels } from '../lib/usePanels';
 import { getCachedPrivyAccessToken } from '../lib/privyTokenCache';
 import { getBackendBaseUrl } from '../lib/backendUrl';
 import { PublicKey } from '@solana/web3.js';
-import { UserRound, LogOut, Settings, Wallet, Wrench, Copy, Globe2, Check } from 'lucide-react';
+import { UserRound, LogOut, Settings, Wallet, Wrench, Copy, Globe2, Check, ListOrdered } from 'lucide-react';
 import WalletPanel from './panels/WalletPanel';
+import LimitOrdersPanel from './panels/LimitOrdersPanel';
 import LendPanel from './panels/LendPanel';
 import { useLendPositions } from '../lib/useLendPositions';
 import AddPanel from './panels/AddPanel';
@@ -73,6 +74,7 @@ export default function UserMenu() {
     closeTransactionInfoPanel,
   } = usePanels({ initialChain: selectedChain });
   const [isDevOpen, setIsDevOpen] = useState(false);
+  const [isLimitOrdersPanelOpen, setIsLimitOrdersPanelOpen] = useState(false);
   const [isLendPanelOpen, setIsLendPanelOpen] = useState(true);
   const lendData = useLendPositions({ enabled: true });
   const [isSwapping, setIsSwapping] = useState(false);
@@ -3405,6 +3407,12 @@ export default function UserMenu() {
             </React.Fragment>
           ))}
           {isAddPanelOpen ? renderAddPanel() : null}
+          {isLimitOrdersPanelOpen ? (
+            <LimitOrdersPanel
+              width={walletWidth}
+              onClose={() => setIsLimitOrdersPanelOpen(false)}
+            />
+          ) : null}
           {isLendPanelOpen ? (
             <LendPanel
               width={walletWidth}
@@ -3419,6 +3427,34 @@ export default function UserMenu() {
           {isWalletPanelOpen && isAddPanelOpen ? renderAddPanel() : null}
         </div>
       )}
+
+      {/* Limit Orders toggle */}
+      {isWalletPanel ? (
+        <button
+          onClick={() => {
+            const next = !isLimitOrdersPanelOpen;
+            setIsLimitOrdersPanelOpen(next);
+            if (next && !isWalletPanelOpen) setIsWalletPanelOpen(true);
+          }}
+          title="Limit Orders (Jupiter Trigger · Solana)"
+          className="flex items-center justify-center rounded-full border-[var(--border-color)] hover:border-[var(--highlight-color)] transition-all shadow-md cursor-pointer"
+          style={{
+            width: `${MENU_ICONS.size * 4 * 1.6}px`,
+            height: `${MENU_ICONS.size * 4 * 1.6}px`,
+            backgroundColor: MENU_ICONS.container_color,
+            borderColor: isLimitOrdersPanelOpen ? MENU_ICONS.highlight_color : undefined,
+            borderWidth: `${MENU_ICONS.border_width}px`,
+            boxSizing: 'content-box',
+            ['--border-color' as never]: MENU_ICONS.border_color,
+            ['--highlight-color' as never]: MENU_ICONS.highlight_color,
+          }}
+        >
+          <ListOrdered
+            style={{ width: `${MENU_ICONS.size * 4}px`, height: `${MENU_ICONS.size * 4}px` }}
+            color={MENU_ICONS.icon_color}
+          />
+        </button>
+      ) : null}
 
       {/* Profile dropdown */}
       <div className="relative">

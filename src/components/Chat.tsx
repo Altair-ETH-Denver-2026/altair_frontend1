@@ -11,6 +11,7 @@ import { getBackendBaseUrl } from '../lib/backendUrl';
 import { useSwap } from '../lib/useSwap';
 import { useSolanaSwap } from '../lib/useSolanaSwap';
 import { useRelay } from '../lib/useRelay';
+import { useJupiterTrigger } from '../lib/useJupiterTrigger';
 import { useJupiterLend } from '../lib/useJupiterLend';
 import { getCachedPrivyAccessToken } from '../lib/privyTokenCache';
 import { dispatchSwapInitiated, dispatchSwapConfirmed } from '../lib/eventTypes';
@@ -26,6 +27,7 @@ import {
   type ChatButtonRowModel,
   type ChatSwapIntent,
 } from '../lib/chatButtonRows';
+import { isLimitOrderIntent, type ChatLimitOrderIntent } from '../lib/limitOrderTypes';
 import { isLendIntent, type ChatLendIntent } from '../lib/lendTypes';
 import ChatButtonRow from './ChatButtonRow';
 import TransactionInfoPanel, { type TransactionInfoPanelState } from './panels/TransactionInfoPanel';
@@ -73,6 +75,7 @@ export default function Chat() {
   const executeSwap = useSwap();
   const executeSolanaSwap = useSolanaSwap();
   const executeRelay = useRelay();
+  const { executeLimitOrder } = useJupiterTrigger();
   const { executeLend } = useJupiterLend();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -576,6 +579,17 @@ export default function Chat() {
     return responseList[randomIndex] ?? 'Swap confirmed!';
   };
 
+  const getRandomLimitOrderSubmittedMessage = () => {
+    const responseList = [
+      ...((CHAT_BUTTON_ROW_TEMPLATES as Record<string, { responseList?: readonly string[] }>)
+        .CONFIRM_LIMIT_ORDER?.responseList ?? []),
+    ] as string[];
+    if (responseList.length <= 0) {
+      return 'Limit order placed.';
+    }
+    const randomIndex = Math.floor(Math.random() * responseList.length);
+    return responseList[randomIndex] ?? 'Limit order placed.';
+  };
   const getRandomLendSubmittedMessage = (templateKey: 'CONFIRM_LEND_DEPOSIT' | 'CONFIRM_LEND_WITHDRAW') => {
     const fallback = templateKey === 'CONFIRM_LEND_DEPOSIT' ? 'Lend deposit confirmed!' : 'Lend withdraw confirmed!';
     const responseList = [...CHAT_BUTTON_ROW_TEMPLATES[templateKey].responseList] as string[];
@@ -1327,6 +1341,8 @@ export default function Chat() {
           template === 'CONFIRM_LEND_DEPOSIT' || template === 'CONFIRM_LEND_WITHDRAW';
         const instantMessage = button.action.actionId === 'CONFIRM_SWAP'
           ? getRandomSwapSubmittedMessage()
+          : button.action.actionId === 'CONFIRM_LIMIT_ORDER'
+            ? getRandomLimitOrderSubmittedMessage()
           : isLendRowTemplate(row.template)
             ? getRandomLendSubmittedMessage(row.template)
             : button.action.presetAssistantMessage;
@@ -1334,6 +1350,31 @@ export default function Chat() {
         if (button.action.actionId === 'CANCEL_SWAP') {
           setPendingIntent(null);
           console.log('[ChatButtonRow] action cancel swap', { rowId: row.id });
+          return;
+        }
+        if (button.action.actionId === 'CANCEL_LIMIT_ORDER') {
+          console.log('[ChatButtonRow] action cancel limit order', { rowId: row.id });
+          return;
+        }
+        if (button.action.actionId === 'CONFIRM_LIMIT_ORDER') {
+          const intent = row.context?.intent;
+          if (!intent || !isLimitOrderIntent(intent)) {
+            addInstantAssistantMessage('Limit order intent was lost — please re-issue the order.');
+            return;
+          }
+          try {
+            const result = await executeLimitOrder(intent as ChatLimitOrderIntent, {
+              CID: row.context?.cid ?? null,
+            });
+            const tail = result.kind === 'time'
+              ? `Scheduled for ${intent.runAt ?? 'the requested time'}.`
+              : `Trigger at ${intent.targetPrice} ${(intent.quoteCurrency ?? 'USDC').toUpperCase()}/${intent.sell.toUpperCase()}.`;
+            const txTail = result.txHash ? ` tx ${result.txHash.slice(0, 8)}…` : '';
+            addInstantAssistantMessage(`${tail}${txTail}`);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            addInstantAssistantMessage(`Limit order failed: ${msg}`);
+          }
           return;
         }
         if (button.action.actionId === 'CONFIRM_SWAP') {
