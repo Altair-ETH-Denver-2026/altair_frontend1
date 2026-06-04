@@ -10,6 +10,7 @@ import {
   dispatchSwapComplete,
   dispatchSwapSubmitted,
 } from './eventTypes';
+import { getBackendBaseUrl } from './backendUrl';
 import { GAS_TOKENS } from '../../config/blockchain_config';
 import * as SolanaTokens from '../../config/token_info/solana_tokens';
 
@@ -111,7 +112,7 @@ export function useJupiterLend() {
     // Look up the Jupiter Lend market for APY + vault metadata (best-effort).
     let market: LendMarket | null = null;
     try {
-      const marketRes = await fetch('/api/jupiter/lend/tokens', { method: 'GET' });
+      const marketRes = await fetch(`${getBackendBaseUrl()}/api/jupiter/lend/tokens`, { method: 'GET' });
       if (marketRes.ok) {
         const data = (await marketRes.json()) as { tokens?: LendMarket[] };
         market =
@@ -135,7 +136,7 @@ export function useJupiterLend() {
     const trimmed = String(params.amount).trim().toLowerCase();
     if (params.action === 'withdraw' && (trimmed === 'all' || trimmed === 'max')) {
       try {
-        const posRes = await fetch(`/api/jupiter/lend/positions?wallet=${encodeURIComponent(signer)}`);
+        const posRes = await fetch(`${getBackendBaseUrl()}/api/jupiter/lend/positions?wallet=${encodeURIComponent(signer)}`);
         if (!posRes.ok) throw new Error(`Positions lookup failed: ${posRes.status}`);
         const posData = (await posRes.json()) as {
           positions?: Array<{ asset?: string; symbol?: string; underlyingAmount?: string; shares?: string }>;
@@ -190,7 +191,7 @@ export function useJupiterLend() {
         description: `Jupiter Lend ${params.action} build tx`,
       },
       () =>
-        fetch(proxyPath, {
+        fetch(`${getBackendBaseUrl()}${proxyPath}`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -313,7 +314,7 @@ export function useJupiterLend() {
 
     // Writeback to /api/lend-positions so MongoDB stays in sync.
     try {
-      const writebackRes = await fetch('/api/lend-positions', {
+      const writebackRes = await fetch(`${getBackendBaseUrl()}/api/lend-positions`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

@@ -157,7 +157,7 @@ export default function LendPanel({ width, onClose, CID = null }: LendPanelProps
           <div className="text-xs text-gray-500 italic py-1">No active lend positions yet.</div>
         ) : (
           <div className="flex flex-col gap-1.5">
-            {positions.map((row) => {
+            {positions.map((row, index) => {
               const symbol = row.token?.symbol ?? '—';
               const decimals = row.token?.decimals ?? 6;
               const principal = formatUnits(row.principalRaw, decimals);
@@ -166,9 +166,13 @@ export default function LendPanel({ width, onClose, CID = null }: LendPanelProps
                 : null;
               const earnings = row.earningsRaw ? formatUnits(row.earningsRaw, decimals) : null;
               const apy = formatApy(row.apySnapshot);
+              const rowKey =
+                (typeof row.LPID === 'string' && row.LPID) ||
+                (typeof row.vault === 'string' && row.vault ? `${symbol}-${row.vault}` : '') ||
+                `position-${index}`;
               return (
                 <div
-                  key={row.LPID ?? `${symbol}-${row.vault ?? 'no-vault'}`}
+                  key={rowKey}
                   className="flex items-center justify-between rounded-md border border-gray-700 bg-gray-800/40 px-2 py-1.5"
                 >
                   <div className="min-w-0">
@@ -203,12 +207,16 @@ export default function LendPanel({ width, onClose, CID = null }: LendPanelProps
           <div className="text-xs text-gray-500 italic py-1">No markets available.</div>
         ) : (
           <div className="flex flex-col gap-1">
-            {sortedMarkets.slice(0, 8).map((market) => {
+            {sortedMarkets.slice(0, 8).map((market, index) => {
               const symbol = (market.symbol ?? '').toUpperCase();
               const isExpanded = expandedMarkets.has(symbol);
+              const marketKey =
+                (typeof market.asset === 'string' && market.asset) ||
+                symbol ||
+                `market-${index}`;
               return (
                 <div
-                  key={market.asset ?? symbol}
+                  key={marketKey}
                   className="rounded-md border border-gray-700 bg-gray-800/40 overflow-hidden"
                 >
                   {/* Header row — click anywhere to expand/collapse */}

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { usePrivy } from '@privy-io/react-auth';
 import { useWallets } from '@privy-io/react-auth/solana';
 import type { LimitOrderRow } from './limitOrderTypes';
+import { getBackendBaseUrl } from './backendUrl';
 
 type FetchState = {
   loading: boolean;
@@ -42,7 +43,7 @@ export function useLimitOrders(opts: { enabled?: boolean } = {}) {
     try {
       const accessToken = await getAccessToken();
       const res = await fetch(
-        `/api/limit-orders?wallet=${encodeURIComponent(solanaAddress)}&status=pending`,
+        `${getBackendBaseUrl()}/api/limit-orders?wallet=${encodeURIComponent(solanaAddress)}&status=pending`,
         {
           headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
         }
@@ -67,7 +68,7 @@ export function useLimitOrders(opts: { enabled?: boolean } = {}) {
   const cancelOrder = useCallback(
     async (LOID: string): Promise<void> => {
       const accessToken = await getAccessToken();
-      const res = await fetch(`/api/limit-orders/${encodeURIComponent(LOID)}`, {
+      const res = await fetch(`${getBackendBaseUrl()}/api/limit-orders/${encodeURIComponent(LOID)}`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
