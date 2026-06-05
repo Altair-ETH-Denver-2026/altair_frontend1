@@ -11,8 +11,8 @@ import { getBackendBaseUrl } from '../lib/backendUrl';
 import { useSwap } from '../lib/useSwap';
 import { useSolanaSwap } from '../lib/useSolanaSwap';
 import { useRelay } from '../lib/useRelay';
-import { useJupiterTrigger } from '../lib/useJupiterTrigger';
 import { useJupiterLend } from '../lib/useJupiterLend';
+import { useJupiterTrigger } from '../lib/useJupiterTrigger';
 import { getCachedPrivyAccessToken } from '../lib/privyTokenCache';
 import { dispatchSwapInitiated, dispatchSwapConfirmed } from '../lib/eventTypes';
 import { BLOCKCHAIN, CHAINS, type ChainKey } from '../../config/blockchain_config';
@@ -27,8 +27,8 @@ import {
   type ChatButtonRowModel,
   type ChatSwapIntent,
 } from '../lib/chatButtonRows';
-import { isLimitOrderIntent, type ChatLimitOrderIntent } from '../lib/limitOrderTypes';
 import { isLendIntent, type ChatLendIntent } from '../lib/lendTypes';
+import { isLimitOrderIntent, type ChatLimitOrderIntent } from '../lib/limitOrderTypes';
 import ChatButtonRow from './ChatButtonRow';
 import TransactionInfoPanel, { type TransactionInfoPanelState } from './panels/TransactionInfoPanel';
 import { readCachedTokenSnapshot } from '../lib/useSwap';
@@ -75,8 +75,8 @@ export default function Chat() {
   const executeSwap = useSwap();
   const executeSolanaSwap = useSolanaSwap();
   const executeRelay = useRelay();
-  const { executeLimitOrder } = useJupiterTrigger();
   const { executeLend } = useJupiterLend();
+  const { executeLimitOrder } = useJupiterTrigger();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -153,11 +153,12 @@ export default function Chat() {
     return null;
   };
 
-  /** Back-compat wrapper that only returns swap-shaped intents (lend intents are filtered out). */
+  /** Back-compat wrapper that only returns swap-shaped intents (lend + limit-order intents are filtered out). */
   const extractSwapIntent = (text: string): SwapIntent | null => {
     const intent = extractAnyIntent(text);
     if (!intent) return null;
     if (isLendIntent(intent)) return null;
+    if (isLimitOrderIntent(intent)) return null;
     return intent as SwapIntent;
   };
 
@@ -579,6 +580,14 @@ export default function Chat() {
     return responseList[randomIndex] ?? 'Swap confirmed!';
   };
 
+  const getRandomLendSubmittedMessage = (templateKey: 'CONFIRM_LEND_DEPOSIT' | 'CONFIRM_LEND_WITHDRAW') => {
+    const fallback = templateKey === 'CONFIRM_LEND_DEPOSIT' ? 'Lend deposit confirmed!' : 'Lend withdraw confirmed!';
+    const responseList = [...CHAT_BUTTON_ROW_TEMPLATES[templateKey].responseList] as string[];
+    if (responseList.length <= 0) return fallback;
+    const randomIndex = Math.floor(Math.random() * responseList.length);
+    return responseList[randomIndex] ?? fallback;
+  };
+
   const getRandomLimitOrderSubmittedMessage = () => {
     const responseList = [
       ...((CHAT_BUTTON_ROW_TEMPLATES as Record<string, { responseList?: readonly string[] }>)
@@ -590,13 +599,7 @@ export default function Chat() {
     const randomIndex = Math.floor(Math.random() * responseList.length);
     return responseList[randomIndex] ?? 'Limit order placed.';
   };
-  const getRandomLendSubmittedMessage = (templateKey: 'CONFIRM_LEND_DEPOSIT' | 'CONFIRM_LEND_WITHDRAW') => {
-    const fallback = templateKey === 'CONFIRM_LEND_DEPOSIT' ? 'Lend deposit confirmed!' : 'Lend withdraw confirmed!';
-    const responseList = [...CHAT_BUTTON_ROW_TEMPLATES[templateKey].responseList] as string[];
-    if (responseList.length <= 0) return fallback;
-    const randomIndex = Math.floor(Math.random() * responseList.length);
-    return responseList[randomIndex] ?? fallback;
-  };
+
   const txInfoPanelInChatEnabled = Boolean(
     (TRANSACTION_INFO_PANEL_DISPLAY as { displayLocation?: { inChat?: unknown } }).displayLocation?.inChat
   );
@@ -1218,11 +1221,15 @@ export default function Chat() {
     try {
       const data = await requestChatResponse({ userMessage, history: historySnapshot, clientRequestId });
       const anyIntent = extractAnyIntent(data.content);
-      const swapIntent = anyIntent && !isLendIntent(anyIntent) ? (anyIntent as ChatSwapIntent) : null;
+      const swapIntent =
+        anyIntent && !isLendIntent(anyIntent) && !isLimitOrderIntent(anyIntent)
+          ? (anyIntent as ChatSwapIntent)
+          : null;
 
-      // Dispatch swap-initiated event only for swap-shaped intents (lend uses its own events)
+      // Dispatch swap-initiated event only for swap-shaped intents (lend + limit orders use their own paths)
       if (swapIntent && swapIntent.type) {
         const selectedChain = resolveIntentChain(swapIntent);
+
 
         // Helper to normalize chain string to ChainKey
         const normalizeToChainKey = (chainStr: string | null | undefined, fallback: ChainKey): ChainKey => {
@@ -1341,11 +1348,11 @@ export default function Chat() {
           template === 'CONFIRM_LEND_DEPOSIT' || template === 'CONFIRM_LEND_WITHDRAW';
         const instantMessage = button.action.actionId === 'CONFIRM_SWAP'
           ? getRandomSwapSubmittedMessage()
-          : button.action.actionId === 'CONFIRM_LIMIT_ORDER'
-            ? getRandomLimitOrderSubmittedMessage()
           : isLendRowTemplate(row.template)
             ? getRandomLendSubmittedMessage(row.template)
-            : button.action.presetAssistantMessage;
+            : button.action.actionId === 'CONFIRM_LIMIT_ORDER'
+              ? getRandomLimitOrderSubmittedMessage()
+              : button.action.presetAssistantMessage;
         addInstantAssistantMessage(instantMessage);
         if (button.action.actionId === 'CANCEL_SWAP') {
           setPendingIntent(null);

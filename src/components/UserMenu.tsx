@@ -13,10 +13,10 @@ import { usePanels } from '../lib/usePanels';
 import { getCachedPrivyAccessToken } from '../lib/privyTokenCache';
 import { getBackendBaseUrl } from '../lib/backendUrl';
 import { PublicKey } from '@solana/web3.js';
-import { UserRound, LogOut, Settings, Wallet, Wrench, Copy, Globe2, Check, ListOrdered } from 'lucide-react';
+import { UserRound, LogOut, Settings, Wallet, Wrench, Copy, Globe2, Check, Coins, ListOrdered } from 'lucide-react';
 import WalletPanel from './panels/WalletPanel';
-import LimitOrdersPanel from './panels/LimitOrdersPanel';
 import LendPanel from './panels/LendPanel';
+import LimitOrdersPanel from './panels/LimitOrdersPanel';
 import { useLendPositions } from '../lib/useLendPositions';
 import AddPanel from './panels/AddPanel';
 import TransactionInfoPanel from './panels/TransactionInfoPanel';
@@ -74,9 +74,9 @@ export default function UserMenu() {
     closeTransactionInfoPanel,
   } = usePanels({ initialChain: selectedChain });
   const [isDevOpen, setIsDevOpen] = useState(false);
-  const [isLimitOrdersPanelOpen, setIsLimitOrdersPanelOpen] = useState(false);
-  const [isLendPanelOpen, setIsLendPanelOpen] = useState(true);
+  const [isLendPanelOpen, setIsLendPanelOpen] = useState(false);
   const lendData = useLendPositions({ enabled: true });
+  const [isLimitOrdersPanelOpen, setIsLimitOrdersPanelOpen] = useState(false);
   const [isSwapping, setIsSwapping] = useState(false);
   const [swapMessage, setSwapMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [balancesByChain, setBalancesByChain] = useState<Record<ChainKey, ApiChainBalances>>({} as Record<ChainKey, ApiChainBalances>);
@@ -3407,16 +3407,16 @@ export default function UserMenu() {
             </React.Fragment>
           ))}
           {isAddPanelOpen ? renderAddPanel() : null}
-          {isLimitOrdersPanelOpen ? (
-            <LimitOrdersPanel
-              width={walletWidth}
-              onClose={() => setIsLimitOrdersPanelOpen(false)}
-            />
-          ) : null}
           {isLendPanelOpen ? (
             <LendPanel
               width={walletWidth}
               onClose={() => setIsLendPanelOpen(false)}
+            />
+          ) : null}
+          {isLimitOrdersPanelOpen ? (
+            <LimitOrdersPanel
+              width={walletWidth}
+              onClose={() => setIsLimitOrdersPanelOpen(false)}
             />
           ) : null}
           {txInfoPanelShowInSidePanel && transactionInfoPanels.map((panel) => (
@@ -3424,9 +3424,36 @@ export default function UserMenu() {
               {renderTransactionInfoPanel(panel)}
             </React.Fragment>
           ))}
-          {isWalletPanelOpen && isAddPanelOpen ? renderAddPanel() : null}
         </div>
       )}
+
+      {/* Lend toggle (opens LendPanel beside wallet panels) */}
+      {isWalletPanel ? (
+        <button
+          onClick={() => {
+            const next = !isLendPanelOpen;
+            setIsLendPanelOpen(next);
+            if (next && !isWalletPanelOpen) setIsWalletPanelOpen(true);
+          }}
+          title="Lend (Jupiter Earn · Solana)"
+          className="flex items-center justify-center rounded-full border-[var(--border-color)] hover:border-[var(--highlight-color)] transition-all shadow-md cursor-pointer"
+          style={{
+            width: `${MENU_ICONS.size * 4 * 1.6}px`,
+            height: `${MENU_ICONS.size * 4 * 1.6}px`,
+            backgroundColor: MENU_ICONS.container_color,
+            borderColor: isLendPanelOpen ? MENU_ICONS.highlight_color : undefined,
+            borderWidth: `${MENU_ICONS.border_width}px`,
+            boxSizing: 'content-box',
+            ['--border-color' as never]: MENU_ICONS.border_color,
+            ['--highlight-color' as never]: MENU_ICONS.highlight_color,
+          }}
+        >
+          <Coins
+            style={{ width: `${MENU_ICONS.size * 4}px`, height: `${MENU_ICONS.size * 4}px` }}
+            color={MENU_ICONS.icon_color}
+          />
+        </button>
+      ) : null}
 
       {/* Limit Orders toggle */}
       {isWalletPanel ? (

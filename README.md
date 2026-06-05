@@ -60,8 +60,8 @@ Wallet display mode is configured in [`config/ui_config.ts`](config/ui_config.ts
 - Solana swap: [`src/lib/useSolanaSwap.ts`](src/lib/useSolanaSwap.ts)
 - Solana transfer: [`src/lib/useSolanaTransfer.ts`](src/lib/useSolanaTransfer.ts)
 - Cross-chain relay: [`src/lib/useRelay.ts`](src/lib/useRelay.ts)
-- Jupiter Trigger (limit / scheduled orders): [`src/lib/useJupiterTrigger.ts`](src/lib/useJupiterTrigger.ts)
 - Jupiter Lend (Earn) deposit/withdraw: [`src/lib/useJupiterLend.ts`](src/lib/useJupiterLend.ts)
+- Jupiter Trigger (limit / scheduled orders): [`src/lib/useJupiterTrigger.ts`](src/lib/useJupiterTrigger.ts)
 
 These hooks execute chain actions and emit `altair:swap-complete` (or `altair:balance-stale`) to drive wallet/balance UI updates.
 

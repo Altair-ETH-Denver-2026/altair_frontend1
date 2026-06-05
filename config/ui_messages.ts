@@ -451,27 +451,6 @@ export const SWAP_SUBMITTED = [
   'Transaction executed perfectly.',
 ];
 
-export const LIMIT_ORDER_SUBMITTED = [
-  'Limit order placed.',
-  'Order is queued and waiting on the trigger.',
-  'Your limit order is live.',
-  'Order submitted — I will fire it when the trigger is met.',
-  'Standing order received.',
-  'Got it. Order is sitting on the book.',
-  'Order is in. I will let you know the moment it executes.',
-  'Limit order recorded. Patience is a position.',
-  'Order placed. The market will come to you.',
-  'Your order is parked at the trigger.',
-];
-
-export const LIMIT_ORDER_CANCELED = [
-  'Order canceled.',
-  'Order pulled from the book.',
-  'Canceled. No harm done.',
-  'Order taken down.',
-  'Removed from the queue.',
-];
-
 export const LEND_DEPOSIT_SUBMITTED = [
   'Lend deposit submitted.',
   'Your deposit is on its way to the lending vault.',
@@ -496,6 +475,27 @@ export const LEND_WITHDRAW_SUBMITTED = [
   'Your lending withdrawal is live on-chain.',
   'Withdraw transaction submitted—settlement underway.',
   'Lending withdrawal launched.',
+];
+
+export const LIMIT_ORDER_SUBMITTED = [
+  'Limit order placed.',
+  'Order is queued and waiting on the trigger.',
+  'Your limit order is live.',
+  'Order submitted — I will fire it when the trigger is met.',
+  'Standing order received.',
+  'Got it. Order is sitting on the book.',
+  'Order is in. I will let you know the moment it executes.',
+  'Limit order recorded. Patience is a position.',
+  'Order placed. The market will come to you.',
+  'Your order is parked at the trigger.',
+];
+
+export const LIMIT_ORDER_CANCELED = [
+  'Order canceled.',
+  'Order pulled from the book.',
+  'Canceled. No harm done.',
+  'Order taken down.',
+  'Removed from the queue.',
 ];
 
 export const POST_SWAP_SUGGESTIONS_1S = [
