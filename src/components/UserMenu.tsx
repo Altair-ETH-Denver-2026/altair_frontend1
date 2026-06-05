@@ -3419,6 +3419,11 @@ export default function UserMenu() {
               onClose={() => setIsLimitOrdersPanelOpen(false)}
             />
           ) : null}
+          {txInfoPanelShowInSidePanel && transactionInfoPanels.map((panel) => (
+            <React.Fragment key={`tx-${panel.id}`}>
+              {renderTransactionInfoPanel(panel)}
+            </React.Fragment>
+          ))}
         </div>
       )}
 
@@ -3449,21 +3454,6 @@ export default function UserMenu() {
           />
         </button>
       ) : null}
-
-          {isLendPanelOpen ? (
-            <LendPanel
-              width={walletWidth}
-              onClose={() => setIsLendPanelOpen(false)}
-            />
-          ) : null}
-          {txInfoPanelShowInSidePanel && transactionInfoPanels.map((panel) => (
-            <React.Fragment key={`tx-${panel.id}`}>
-              {renderTransactionInfoPanel(panel)}
-            </React.Fragment>
-          ))}
-          {isWalletPanelOpen && isAddPanelOpen ? renderAddPanel() : null}
-        </div>
-      )}
 
       {/* Limit Orders toggle */}
       {isWalletPanel ? (

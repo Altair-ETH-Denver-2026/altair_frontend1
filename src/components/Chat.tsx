@@ -599,13 +599,7 @@ export default function Chat() {
     const randomIndex = Math.floor(Math.random() * responseList.length);
     return responseList[randomIndex] ?? 'Limit order placed.';
   };
-  const getRandomLendSubmittedMessage = (templateKey: 'CONFIRM_LEND_DEPOSIT' | 'CONFIRM_LEND_WITHDRAW') => {
-    const fallback = templateKey === 'CONFIRM_LEND_DEPOSIT' ? 'Lend deposit confirmed!' : 'Lend withdraw confirmed!';
-    const responseList = [...CHAT_BUTTON_ROW_TEMPLATES[templateKey].responseList] as string[];
-    if (responseList.length <= 0) return fallback;
-    const randomIndex = Math.floor(Math.random() * responseList.length);
-    return responseList[randomIndex] ?? fallback;
-  };
+
   const txInfoPanelInChatEnabled = Boolean(
     (TRANSACTION_INFO_PANEL_DISPLAY as { displayLocation?: { inChat?: unknown } }).displayLocation?.inChat
   );
