@@ -1,6 +1,8 @@
 'use client';
 
 import { CHAT_BUTTON_ROW_TEMPLATES as AI_CHAT_BUTTON_ROW_TEMPLATES } from '../../config/ai_config';
+import type { ChatLendIntent } from './lendTypes';
+import { isLendIntent } from './lendTypes';
 import type { ChatLimitOrderIntent } from './limitOrderTypes';
 import { isLimitOrderIntent } from './limitOrderTypes';
 
@@ -13,8 +15,8 @@ export type ChatSwapIntent = {
   buyTokenChain?: string | null;
 };
 
-/** Union of all chat intents that can drive a confirm/cancel button row. */
-export type ChatActionableIntent = ChatSwapIntent | ChatLimitOrderIntent;
+/** Union of all chat-actionable intents that have a button row template. */
+export type ChatActionableIntent = ChatSwapIntent | ChatLendIntent | ChatLimitOrderIntent;
 
 export type ChatButtonAction =
   | {
@@ -33,7 +35,12 @@ export type ChatButtonItem = {
   action: ChatButtonAction;
 };
 
-export type ChatButtonRowTemplateKey = 'CONFIRM_SWAP' | 'SWAP_FOLLOWUP' | 'CONFIRM_LIMIT_ORDER';
+export type ChatButtonRowTemplateKey =
+  | 'CONFIRM_SWAP'
+  | 'SWAP_FOLLOWUP'
+  | 'CONFIRM_LEND_DEPOSIT'
+  | 'CONFIRM_LEND_WITHDRAW'
+  | 'CONFIRM_LIMIT_ORDER';
 export type ChatButtonRowLogicTrigger = 'TRANSACTION_SUBMITTED';
 
 export type ChatButtonRowModel = {
@@ -63,10 +70,16 @@ const isSwapIntent = (intent: ChatActionableIntent | null): intent is ChatSwapIn
   );
 
 const resolveTokenLabel = (intent: ChatActionableIntent): string => {
+  if (isLendIntent(intent)) {
+    return String(intent.token ?? 'TOKEN').toUpperCase();
+  }
   if (isLimitOrderIntent(intent)) {
     return String(intent.side === 'SELL' ? intent.sell : intent.buy ?? intent.sell ?? 'TOKEN').toUpperCase();
   }
-  return String(intent.buy ?? intent.sell ?? 'TOKEN').toUpperCase();
+  if (isSwapIntent(intent)) {
+    return String(intent.buy ?? intent.sell ?? 'TOKEN').toUpperCase();
+  }
+  return 'TOKEN';
 };
 
 const buildTemplateFromConfig = (params: {
@@ -96,6 +109,8 @@ const buildTemplateFromConfig = (params: {
 export const CHAT_BUTTON_ROW_TEMPLATES: Record<ChatButtonRowTemplateKey, ChatButtonRowTemplateFactory> = {
   CONFIRM_SWAP: (params) => buildTemplateFromConfig({ template: 'CONFIRM_SWAP', ...params }),
   SWAP_FOLLOWUP: (params) => buildTemplateFromConfig({ template: 'SWAP_FOLLOWUP', ...params }),
+  CONFIRM_LEND_DEPOSIT: (params) => buildTemplateFromConfig({ template: 'CONFIRM_LEND_DEPOSIT', ...params }),
+  CONFIRM_LEND_WITHDRAW: (params) => buildTemplateFromConfig({ template: 'CONFIRM_LEND_WITHDRAW', ...params }),
   CONFIRM_LIMIT_ORDER: (params) =>
     buildTemplateFromConfig({ template: 'CONFIRM_LIMIT_ORDER', ...params }),
 };
@@ -131,16 +146,31 @@ export const buildChatButtonRowFromIntent = (params: {
   intent: ChatActionableIntent | null;
   cid?: string | null;
 }): ChatButtonRowModel | null => {
-  if (isLimitOrderIntent(params.intent)) {
-    return CHAT_BUTTON_ROW_TEMPLATES.CONFIRM_LIMIT_ORDER({
-      intent: params.intent,
+  const intent = params.intent;
+  if (!intent) return null;
+
+  if (isLendIntent(intent)) {
+    const templateKey: ChatButtonRowTemplateKey =
+      intent.type === 'LEND_DEPOSIT_INTENT' ? 'CONFIRM_LEND_DEPOSIT' : 'CONFIRM_LEND_WITHDRAW';
+    return CHAT_BUTTON_ROW_TEMPLATES[templateKey]({
+      intent,
       cid: params.cid ?? null,
     });
   }
-  if (!isSwapIntent(params.intent)) return null;
-  return CHAT_BUTTON_ROW_TEMPLATES.CONFIRM_SWAP({
-    intent: params.intent,
-    cid: params.cid ?? null,
-  });
-};
 
+  if (isLimitOrderIntent(intent)) {
+    return CHAT_BUTTON_ROW_TEMPLATES.CONFIRM_LIMIT_ORDER({
+      intent,
+      cid: params.cid ?? null,
+    });
+  }
+
+  if (isSwapIntent(intent)) {
+    return CHAT_BUTTON_ROW_TEMPLATES.CONFIRM_SWAP({
+      intent,
+      cid: params.cid ?? null,
+    });
+  }
+
+  return null;
+};

@@ -11,13 +11,13 @@ import { getBackendBaseUrl } from '../lib/backendUrl';
 import { useSwap } from '../lib/useSwap';
 import { useSolanaSwap } from '../lib/useSolanaSwap';
 import { useRelay } from '../lib/useRelay';
+import { useJupiterLend } from '../lib/useJupiterLend';
 import { useJupiterTrigger } from '../lib/useJupiterTrigger';
-import { useJupiterTriggerV2 } from '../lib/useJupiterTriggerV2';
 import { getCachedPrivyAccessToken } from '../lib/privyTokenCache';
-import { dispatchSwapInitiated } from '../lib/eventTypes';
+import { dispatchSwapInitiated, dispatchSwapConfirmed } from '../lib/eventTypes';
 import { BLOCKCHAIN, CHAINS, type ChainKey } from '../../config/blockchain_config';
 import * as SolanaTokens from '../../config/token_info/solana_tokens';
-import { CHAT_PANEL } from '../../config/ui_config';
+import { CHAT_PANEL, CHAIN_OPTIONS, TRANSACTION_INFO_PANEL_DISPLAY } from '../../config/ui_config';
 import { CHAT_BUTTON_ROW_TEMPLATES } from '../../config/ai_config';
 import {
   buildChatButtonRowFromIntent,
@@ -27,8 +27,13 @@ import {
   type ChatButtonRowModel,
   type ChatSwapIntent,
 } from '../lib/chatButtonRows';
+import { isLendIntent, type ChatLendIntent } from '../lib/lendTypes';
 import { isLimitOrderIntent, type ChatLimitOrderIntent } from '../lib/limitOrderTypes';
 import ChatButtonRow from './ChatButtonRow';
+import TransactionInfoPanel, { type TransactionInfoPanelState } from './panels/TransactionInfoPanel';
+import { readCachedTokenSnapshot } from '../lib/useSwap';
+import { useWallets } from '@privy-io/react-auth';
+import { BASE_MAINNET, BASE_SEPOLIA, ETH_MAINNET, ETH_SEPOLIA, SOLANA_MAINNET } from '../../config/chain_info';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -39,6 +44,7 @@ interface Message {
   zgError?: string | null;
   cid?: string | null;
   chatButtonRow?: ChatButtonRowModel | null;
+  transactionInfoPanel?: TransactionInfoPanelState | null;
 }
 
 type SwapIntent = ChatSwapIntent;
@@ -162,11 +168,17 @@ export default function Chat() {
     return raw;
   };
 
+  const { wallets: evmWallets } = useWallets();
+  const executeSwap = useSwap();
+  const executeSolanaSwap = useSolanaSwap();
+  const executeRelay = useRelay();
+  const { executeLend } = useJupiterLend();
+  const { executeLimitOrder } = useJupiterTrigger();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isExecutingSwap, setIsExecutingSwap] = useState(false);
-  const [pendingIntent, setPendingIntent] = useState<SwapIntent | null>(null);
+  const [pendingIntent, setPendingIntent] = useState<ChatActionableIntent | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const rowActionsInFlightRef = useRef<Set<string>>(new Set());
   const inFlightClientRequestIdsRef = useRef<Set<string>>(new Set());
@@ -213,11 +225,13 @@ export default function Chat() {
     return () => clearTimeout(timer);
   }, [messages, typingSpeedMs]);
 
-  const extractSwapIntent = (text: string): SwapIntent | null => {
+  const extractAnyIntent = (text: string): ChatActionableIntent | null => {
     const trimmed = text.trim();
-    const parseCandidate = (candidate: string) => {
+    const parseCandidate = (candidate: string): ChatActionableIntent | null => {
       try {
-        return JSON.parse(candidate) as SwapIntent;
+        const parsed = JSON.parse(candidate) as { type?: string };
+        if (!parsed || typeof parsed !== 'object' || typeof parsed.type !== 'string') return null;
+        return parsed as ChatActionableIntent;
       } catch {
         return null;
       }
@@ -255,9 +269,19 @@ export default function Chat() {
   };
 
   const extractIntentJsonSlice = (text: string): { intent: SwapIntent; start: number; end: number } | null => {
+  /** Back-compat wrapper that only returns swap-shaped intents (lend + limit-order intents are filtered out). */
+  const extractSwapIntent = (text: string): SwapIntent | null => {
+    const intent = extractAnyIntent(text);
+    if (!intent) return null;
+    if (isLendIntent(intent)) return null;
+    if (isLimitOrderIntent(intent)) return null;
+    return intent as SwapIntent;
+  };
+
+  const extractIntentJsonSlice = (text: string): { intent: ChatActionableIntent; start: number; end: number } | null => {
     const trimmed = text.trim();
     if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
-      const intent = extractSwapIntent(trimmed);
+      const intent = extractAnyIntent(trimmed);
       if (intent?.type) {
         return { intent, start: text.indexOf('{'), end: text.lastIndexOf('}') + 1 };
       }
@@ -267,7 +291,7 @@ export default function Chat() {
     const lastBrace = text.lastIndexOf('}');
     if (firstBrace >= 0 && lastBrace > firstBrace) {
       const candidate = text.slice(firstBrace, lastBrace + 1);
-      const intent = extractSwapIntent(candidate);
+      const intent = extractAnyIntent(candidate);
       if (intent?.type) {
         return { intent, start: firstBrace, end: lastBrace + 1 };
       }
@@ -297,6 +321,45 @@ export default function Chat() {
     if (sellChain && sellChain in CHAINS) return sellChain as ChainKey;
     if (buyChain && buyChain in CHAINS) return buyChain as ChainKey;
     return resolveSelectedChain();
+  };
+
+  const deriveConfirmedSwapMeta = (
+    intent: ExecutableSwapIntent
+  ): {
+    sellToken: string;
+    buyToken: string;
+    sellChain: ChainKey;
+    buyChain: ChainKey;
+    amount: string;
+    intentType: 'SINGLE_CHAIN_SWAP_INTENT' | 'CROSS_CHAIN_SWAP_INTENT' | 'BRIDGE_INTENT';
+  } | null => {
+    const sell = intent.sell?.toUpperCase();
+    const buy = intent.buy?.toUpperCase();
+    if (!sell || !buy) return null;
+    const amount = typeof intent.amount === 'number' ? intent.amount.toString() : intent.amount;
+    if (!amount) return null;
+    let sellChain: ChainKey;
+    let buyChain: ChainKey;
+    if (intent.type === 'CROSS_CHAIN_SWAP_INTENT' || intent.type === 'BRIDGE_INTENT') {
+      if (!intent.sellTokenChain || !intent.buyTokenChain) return null;
+      if (!(intent.sellTokenChain in CHAINS) || !(intent.buyTokenChain in CHAINS)) return null;
+      sellChain = intent.sellTokenChain as ChainKey;
+      buyChain = intent.buyTokenChain as ChainKey;
+    } else {
+      const single = resolveIntentChain(intent);
+      sellChain = single;
+      buyChain = single;
+    }
+    const normalizedSell = sellChain === 'SOLANA_MAINNET' && sell === 'ETH' ? 'SOL' : sell;
+    const normalizedBuy = buyChain === 'SOLANA_MAINNET' && buy === 'ETH' ? 'SOL' : buy;
+    return {
+      sellToken: normalizedSell,
+      buyToken: normalizedBuy,
+      sellChain,
+      buyChain,
+      amount,
+      intentType: intent.type,
+    };
   };
 
   const isConfirmationMessage = (text: string): boolean => {
@@ -331,7 +394,7 @@ export default function Chat() {
                 description: 'Solana sell token mint lookup',
               },
               () =>
-                fetch('/api/token-mint', {
+                fetch(`${getBackendBaseUrl()}/api/token-mint`, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ q: sell }),
@@ -346,7 +409,7 @@ export default function Chat() {
                 description: 'Solana buy token mint lookup',
               },
               () =>
-                fetch('/api/token-mint', {
+                fetch(`${getBackendBaseUrl()}/api/token-mint`, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({ q: buy }),
@@ -378,7 +441,7 @@ export default function Chat() {
   };
 
   const maybeExecuteSwapIntent = async (
-    intent: SwapIntent | null,
+    intent: ChatActionableIntent | null,
     cid: string | null | undefined,
     userMessage: string
   ) => {
@@ -390,10 +453,40 @@ export default function Chat() {
       return null;
     }
 
-    const effectiveIntent = (pendingIntent ?? intent) as ExecutableSwapIntent | null;
+    const effectiveIntent = pendingIntent ?? intent;
     if (!effectiveIntent) return null;
     setPendingIntent(null);
-    return executeIntentNow(effectiveIntent, cid ?? null);
+    if (isLendIntent(effectiveIntent)) {
+      return executeLendIntentNow(effectiveIntent, cid ?? null);
+    }
+    return executeIntentNow(effectiveIntent as ExecutableSwapIntent, cid ?? null);
+  };
+
+  const executeLendIntentNow = async (
+    intent: ChatLendIntent,
+    cid: string | null | undefined
+  ): Promise<string | null> => {
+    const tokenSymbol = String(intent.token ?? '').toUpperCase();
+    const amount = typeof intent.amount === 'number' ? String(intent.amount) : intent.amount;
+    if (!tokenSymbol || !amount) return null;
+    if (!solanaWallets?.[0]?.address) {
+      return 'Connect a Solana wallet (e.g. Phantom) to use Jupiter Lend on Solana, then try again.';
+    }
+    const action: 'deposit' | 'withdraw' = intent.type === 'LEND_DEPOSIT_INTENT' ? 'deposit' : 'withdraw';
+    setIsExecutingSwap(true);
+    try {
+      const result = await executeLend({ action, tokenSymbol, amount, CID: cid ?? null });
+      const verb = action === 'deposit' ? 'Lent' : 'Withdrew';
+      const aprNote = typeof result.apySnapshot === 'number'
+        ? ` (current APY ~${result.apySnapshot.toFixed(2)}%)`
+        : '';
+      return `${verb} ${amount} ${tokenSymbol} on Solana via Jupiter Lend${aprNote}.\n${result.txHash}`;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return `Lend ${action} failed: ${msg}`;
+    } finally {
+      setIsExecutingSwap(false);
+    }
   };
 
   const executeIntentNow = async (
@@ -437,14 +530,13 @@ export default function Chat() {
     try {
       const normalizedSell = selectedChain === 'SOLANA_MAINNET' && sell === 'ETH' ? 'SOL' : sell;
       const normalizedBuy = selectedChain === 'SOLANA_MAINNET' && buy === 'ETH' ? 'SOL' : buy;
-      const result =
-        selectedChain === 'SOLANA_MAINNET'
-          ? await executeSolanaSwap(normalizedSell, amount, normalizedBuy, cid)
-          : await executeSwap(sell, amount, buy, cid);
-      const { txHash, buyAmount } =
-        selectedChain === 'SOLANA_MAINNET'
-          ? { txHash: result as string, buyAmount: 'unknown' }
-          : { txHash: result as string, buyAmount: 'unknown' };
+      await (selectedChain === 'SOLANA_MAINNET'
+        ? executeSolanaSwap(normalizedSell, amount, normalizedBuy, cid)
+        : executeSwap(sell, amount, buy, cid));
+      const buyAmountKey = `${normalizedSell.toUpperCase()}:${normalizedBuy.toUpperCase()}:${selectedChain}`;
+      const resolvedBuyAmount = completedSwapBuyAmountsRef.current.get(buyAmountKey) ?? null;
+      if (resolvedBuyAmount) completedSwapBuyAmountsRef.current.delete(buyAmountKey);
+      const buyAmount = resolvedBuyAmount ?? 'unknown';
       const action = 'swapped';
       console.log('[ChatButtonRow] executeIntentNow swap success', {
         action,
@@ -452,7 +544,7 @@ export default function Chat() {
         sell: normalizedSell,
         buy: normalizedBuy,
       });
-      return `Swap executed: ${action} ${amount} ${normalizedSell} for ${buyAmount} ${normalizedBuy}.\n${txHash}`;
+      return `Swap executed: ${action} ${amount} ${normalizedSell} for ${buyAmount} ${normalizedBuy}.`;
     } catch (swapErr) {
       const err = swapErr as {
         message?: string;
@@ -516,7 +608,7 @@ export default function Chat() {
       return row?.id === rowId && row?.isActive === true && row?.isLocked !== true;
     });
 
-  const addInstantAssistantMessage = (content: string) => {
+  const addInstantAssistantMessage = (content: string, options?: { chatButtonRow?: ChatButtonRowModel | null }) => {
     const normalized = content.replace(/^[\s\r\n]+/, '');
     setMessages((prev) => [
       ...prev,
@@ -525,6 +617,7 @@ export default function Chat() {
         content: normalized,
         displayContent: normalized,
         isTyping: false,
+        chatButtonRow: options?.chatButtonRow ?? null,
       },
     ]);
   };
@@ -603,6 +696,14 @@ export default function Chat() {
     return responseList[randomIndex] ?? 'Swap confirmed!';
   };
 
+  const getRandomLendSubmittedMessage = (templateKey: 'CONFIRM_LEND_DEPOSIT' | 'CONFIRM_LEND_WITHDRAW') => {
+    const fallback = templateKey === 'CONFIRM_LEND_DEPOSIT' ? 'Lend deposit confirmed!' : 'Lend withdraw confirmed!';
+    const responseList = [...CHAT_BUTTON_ROW_TEMPLATES[templateKey].responseList] as string[];
+    if (responseList.length <= 0) return fallback;
+    const randomIndex = Math.floor(Math.random() * responseList.length);
+    return responseList[randomIndex] ?? fallback;
+  };
+
   const getRandomLimitOrderSubmittedMessage = () => {
     const responseList = [
       ...((CHAT_BUTTON_ROW_TEMPLATES as Record<string, { responseList?: readonly string[] }>)
@@ -614,6 +715,504 @@ export default function Chat() {
     const randomIndex = Math.floor(Math.random() * responseList.length);
     return responseList[randomIndex] ?? 'Limit order placed.';
   };
+
+  const txInfoPanelInChatEnabled = Boolean(
+    (TRANSACTION_INFO_PANEL_DISPLAY as { displayLocation?: { inChat?: unknown } }).displayLocation?.inChat
+  );
+
+  const evmWalletAddressRef = useRef<string | null>(null);
+  evmWalletAddressRef.current = evmWallets[0]?.address?.toLowerCase() ?? null;
+  const solanaWalletAddressRef = useRef<string | null>(null);
+  solanaWalletAddressRef.current = solanaWallets[0]?.address ?? null;
+  const txPanelIdRef = useRef(0);
+  const completedSwapBuyAmountsRef = useRef<Map<string, string>>(new Map());
+  const pendingSwapSnapshotsRef = useRef<Map<string, { buyBalanceBeforeRaw: string | null; buyTokenDecimals: number | null }>>(new Map());
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!txInfoPanelInChatEnabled) return;
+
+    const rawDeltaToHuman = (afterRaw: string, beforeRaw: string | null, decimals: number): string => {
+      try {
+        const after = BigInt(afterRaw);
+        const before = beforeRaw ? BigInt(beforeRaw) : 0n;
+        const diff = after - before;
+        const sign = diff < 0n ? '-' : '';
+        const abs = diff < 0n ? -diff : diff;
+        const base = 10n ** BigInt(decimals);
+        const whole = abs / base;
+        const fraction = abs % base;
+        if (fraction === 0n) return `${sign}${whole.toString()}`;
+        const padded = fraction.toString().padStart(decimals, '0').replace(/0+$/, '');
+        return `${sign}${whole.toString()}.${padded}`;
+      } catch {
+        return '0';
+      }
+    };
+
+    const writeSnapshotIfMissing = (sellToken: string, buyToken: string, sellChain: ChainKey, buyChain: ChainKey) => {
+      const snapshotKey = `${sellToken}:${buyToken}:${sellChain}`;
+      if (pendingSwapSnapshotsRef.current.has(snapshotKey)) {
+        return pendingSwapSnapshotsRef.current.get(snapshotKey)!;
+      }
+      const isSolana = buyChain === 'SOLANA_MAINNET' || buyChain === 'SOLANA_DEVNET';
+      const walletForChain = isSolana ? solanaWalletAddressRef.current : evmWalletAddressRef.current;
+      const snapshot = readCachedTokenSnapshot({
+        chainKey: buyChain,
+        walletAddress: walletForChain,
+        symbol: buyToken,
+      });
+      const entry = { buyBalanceBeforeRaw: snapshot.raw, buyTokenDecimals: snapshot.decimals };
+      pendingSwapSnapshotsRef.current.set(snapshotKey, entry);
+      return entry;
+    };
+
+    const handleSwapConfirmedInChat = (event: Event) => {
+      const detail = (event as CustomEvent).detail as {
+        sellToken?: string;
+        buyToken?: string;
+        sellChain?: ChainKey;
+        buyChain?: ChainKey;
+        amount?: string;
+        intentId?: string | null;
+      } | undefined;
+      if (!detail?.sellChain || !detail?.buyChain) return;
+      const sellChain = detail.sellChain;
+      const buyChain = detail.buyChain;
+      const sellToken = (detail.sellToken ?? '').toUpperCase();
+      const buyToken = (detail.buyToken ?? '').toUpperCase();
+      if (!sellToken || !buyToken) return;
+      const intentId = detail.intentId ?? null;
+
+      setMessages((prev) => {
+        // Dedupe: if a pending panel for this intent already exists, do nothing.
+        // Protects against confirmed firing twice for one click.
+        if (intentId) {
+          for (let i = prev.length - 1; i >= 0; i -= 1) {
+            const panel = prev[i]?.transactionInfoPanel;
+            if (!panel) continue;
+            if (panel.status !== 'pending') continue;
+            if (panel.intentId === intentId) return prev;
+          }
+        }
+
+        const snapshotEntry = writeSnapshotIfMissing(sellToken, buyToken, sellChain, buyChain);
+        const nextId = txPanelIdRef.current + 1;
+        txPanelIdRef.current = nextId;
+
+        return [
+          ...prev,
+          {
+            role: 'assistant',
+            content: '',
+            displayContent: '',
+            isTyping: false,
+            transactionInfoPanel: {
+              id: nextId,
+              intentId,
+              txKey: null,
+              txHash: null,
+              sellChain,
+              buyChain,
+              sellToken,
+              buyToken,
+              sellAmount: detail.amount ?? '',
+              buyAmount: null,
+              buyBalanceBeforeRaw: snapshotEntry.buyBalanceBeforeRaw,
+              buyTokenDecimals: snapshotEntry.buyTokenDecimals,
+              status: 'pending',
+            },
+          },
+        ];
+      });
+    };
+
+    const handleSwapSubmittedInChat = (event: Event) => {
+      const detail = (event as CustomEvent).detail as {
+        sellToken?: string;
+        buyToken?: string;
+        sellChain?: ChainKey;
+        buyChain?: ChainKey;
+        amount?: string;
+        txHash?: string;
+        requestId?: string;
+        intentId?: string | null;
+      } | undefined;
+      if (!detail?.sellChain || !detail?.buyChain) return;
+      const sellChain = detail.sellChain;
+      const buyChain = detail.buyChain;
+      const sellToken = (detail.sellToken ?? '').toUpperCase();
+      const buyToken = (detail.buyToken ?? '').toUpperCase();
+      if (!sellToken || !buyToken) return;
+      const txKey = detail.txHash ?? detail.requestId ?? null;
+      const intentId = detail.intentId ?? null;
+
+      setMessages((prev) => {
+        // Primary match: same intent. A retry for the same swap intent must
+        // update the existing pending panel rather than create a second one,
+        // even if the panel already has a txKey from a prior submission.
+        if (intentId) {
+          for (let i = prev.length - 1; i >= 0; i -= 1) {
+            const message = prev[i];
+            const panel = message.transactionInfoPanel;
+            if (!panel) continue;
+            if (panel.status !== 'pending') continue;
+            if (panel.intentId !== intentId) continue;
+            const next = prev.slice();
+            next[i] = {
+              ...message,
+              transactionInfoPanel: {
+                ...panel,
+                txKey,
+                txHash: detail.txHash ?? null,
+                sellAmount: detail.amount ?? panel.sellAmount,
+              },
+            };
+            return next;
+          }
+        }
+
+        // Fallback for legacy events without intentId: original token-pair
+        // matcher, only against panels that haven't been claimed yet.
+        for (let i = prev.length - 1; i >= 0; i -= 1) {
+          const message = prev[i];
+          const panel = message.transactionInfoPanel;
+          if (!panel) continue;
+          if (panel.status !== 'pending') continue;
+          if (panel.txKey !== null) continue;
+          if (panel.sellToken !== sellToken) continue;
+          if (panel.buyToken !== buyToken) continue;
+          if (panel.sellChain !== sellChain) continue;
+          const next = prev.slice();
+          next[i] = {
+            ...message,
+            transactionInfoPanel: {
+              ...panel,
+              txKey,
+              txHash: detail.txHash ?? null,
+              sellAmount: detail.amount ?? panel.sellAmount,
+            },
+          };
+          return next;
+        }
+
+        const snapshotEntry = writeSnapshotIfMissing(sellToken, buyToken, sellChain, buyChain);
+        const nextId = txPanelIdRef.current + 1;
+        txPanelIdRef.current = nextId;
+        return [
+          ...prev,
+          {
+            role: 'assistant',
+            content: '',
+            displayContent: '',
+            isTyping: false,
+            transactionInfoPanel: {
+              id: nextId,
+              intentId,
+              txKey,
+              txHash: detail.txHash ?? null,
+              sellChain,
+              buyChain,
+              sellToken,
+              buyToken,
+              sellAmount: detail.amount ?? '',
+              buyAmount: null,
+              buyBalanceBeforeRaw: snapshotEntry.buyBalanceBeforeRaw,
+              buyTokenDecimals: snapshotEntry.buyTokenDecimals,
+              status: 'pending',
+            },
+          },
+        ];
+      });
+    };
+
+    const handleSwapCompleteInChat = (event: Event) => {
+      const detail = (event as CustomEvent).detail as {
+        chain?: ChainKey;
+        sellToken?: string;
+        buyToken?: string;
+        txHash?: string;
+        requestId?: string;
+        intentId?: string | null;
+        balanceUpdates?: Array<{
+          chain: ChainKey;
+          symbol: string;
+          balanceAfterRaw: string | null;
+          decimals: number;
+        }>;
+      } | undefined;
+      if (!detail) return;
+      const sellToken = (detail.sellToken ?? '').toUpperCase();
+      const buyToken = (detail.buyToken ?? '').toUpperCase();
+      const sellChainFromDetail = detail.chain;
+      const txKey = detail.txHash ?? detail.requestId ?? null;
+      const intentId = detail.intentId ?? null;
+
+      // Resolve buyAmount synchronously (before setMessages) so executeIntentNow can read it.
+      let resolvedBuyAmount: string | null = null;
+      let resolvedDecimals: number | null = null;
+      if (sellChainFromDetail) {
+        const snapshotKey = `${sellToken}:${buyToken}:${sellChainFromDetail}`;
+        const snapshotForSwap = pendingSwapSnapshotsRef.current.get(snapshotKey);
+        const buyEntry = (detail.balanceUpdates ?? []).find(
+          (entry) => (entry.symbol ?? '').toUpperCase() === buyToken
+        );
+        if (buyEntry?.balanceAfterRaw) {
+          resolvedDecimals = snapshotForSwap?.buyTokenDecimals ?? buyEntry.decimals ?? 0;
+          resolvedBuyAmount = rawDeltaToHuman(
+            buyEntry.balanceAfterRaw,
+            snapshotForSwap?.buyBalanceBeforeRaw ?? null,
+            resolvedDecimals
+          );
+          completedSwapBuyAmountsRef.current.set(snapshotKey, resolvedBuyAmount);
+          pendingSwapSnapshotsRef.current.delete(snapshotKey);
+        }
+      }
+
+      setMessages((prev) => {
+        let matchedIndex = -1;
+        if (intentId) {
+          for (let i = prev.length - 1; i >= 0; i -= 1) {
+            const panel = prev[i]?.transactionInfoPanel;
+            if (!panel) continue;
+            if (panel.status !== 'pending') continue;
+            if (panel.intentId === intentId) {
+              matchedIndex = i;
+              break;
+            }
+          }
+        }
+        if (matchedIndex === -1 && txKey) {
+          for (let i = prev.length - 1; i >= 0; i -= 1) {
+            const panel = prev[i]?.transactionInfoPanel;
+            if (!panel) continue;
+            if (panel.status !== 'pending') continue;
+            if (panel.txKey && panel.txKey === txKey) {
+              matchedIndex = i;
+              break;
+            }
+          }
+        }
+        if (matchedIndex === -1) {
+          for (let i = prev.length - 1; i >= 0; i -= 1) {
+            const panel = prev[i]?.transactionInfoPanel;
+            if (!panel) continue;
+            if (panel.status !== 'pending') continue;
+            if (panel.sellToken !== sellToken) continue;
+            if (panel.buyToken !== buyToken) continue;
+            if (sellChainFromDetail && panel.sellChain !== sellChainFromDetail) continue;
+            matchedIndex = i;
+            break;
+          }
+        }
+        if (matchedIndex === -1) {
+          for (let i = prev.length - 1; i >= 0; i -= 1) {
+            const panel = prev[i]?.transactionInfoPanel;
+            if (!panel) continue;
+            if (panel.status !== 'pending') continue;
+            if (panel.buyToken !== buyToken) continue;
+            matchedIndex = i;
+            break;
+          }
+        }
+        if (matchedIndex === -1) {
+          console.warn('[TransactionInfoPanel] swap-complete fired with no matching pending in-chat panel', {
+            txKey,
+            sellToken,
+            buyToken,
+            sellChainFromDetail,
+          });
+          return prev;
+        }
+        const message = prev[matchedIndex];
+        const panel = message.transactionInfoPanel!;
+        const buyEntry = (detail.balanceUpdates ?? []).find(
+          (entry) =>
+            (entry.symbol ?? '').toUpperCase() === panel.buyToken &&
+            entry.chain === panel.buyChain
+        );
+        let nextBuyAmount: string | null = panel.buyAmount;
+        let nextDecimals = panel.buyTokenDecimals;
+        if (buyEntry?.balanceAfterRaw) {
+          nextDecimals = panel.buyTokenDecimals ?? buyEntry.decimals ?? 0;
+          nextBuyAmount = rawDeltaToHuman(buyEntry.balanceAfterRaw, panel.buyBalanceBeforeRaw, nextDecimals);
+        } else if (resolvedBuyAmount) {
+          nextBuyAmount = resolvedBuyAmount;
+          nextDecimals = resolvedDecimals ?? nextDecimals;
+        }
+        const next = prev.slice();
+        next[matchedIndex] = {
+          ...message,
+          transactionInfoPanel: {
+            ...panel,
+            status: 'complete',
+            buyAmount: nextBuyAmount,
+            buyTokenDecimals: nextDecimals,
+            txKey: panel.txKey ?? txKey,
+            txHash: panel.txHash ?? (detail.txHash ?? null),
+          },
+        };
+        return next;
+      });
+    };
+
+    window.addEventListener('altair:swap-confirmed', handleSwapConfirmedInChat);
+    window.addEventListener('altair:swap-submitted', handleSwapSubmittedInChat);
+    window.addEventListener('altair:swap-complete', handleSwapCompleteInChat);
+    return () => {
+      window.removeEventListener('altair:swap-confirmed', handleSwapConfirmedInChat);
+      window.removeEventListener('altair:swap-submitted', handleSwapSubmittedInChat);
+      window.removeEventListener('altair:swap-complete', handleSwapCompleteInChat);
+    };
+  }, [txInfoPanelInChatEnabled]);
+
+  const txInfoPanelInChatConfig = TRANSACTION_INFO_PANEL_DISPLAY.inChat;
+  const txInfoPanelWidth = txInfoPanelInChatConfig.width;
+  const txInfoPanelPaddingLeft = txInfoPanelInChatConfig.paddingLeft;
+  const txInfoPanelPaddingRight = txInfoPanelInChatConfig.paddingRight;
+  const txInfoPanelPaddingTop = txInfoPanelInChatConfig.paddingTop;
+  const txInfoPanelPaddingBottom = txInfoPanelInChatConfig.paddingBottom;
+  const txInfoPanelCloseConfig = txInfoPanelInChatConfig.x;
+  const txInfoPanelClosePaddingTop = txInfoPanelCloseConfig.paddingTop;
+  const txInfoPanelClosePaddingRight = txInfoPanelCloseConfig.paddingRight;
+  const txInfoPanelCloseSize = txInfoPanelCloseConfig.size;
+  const txInfoPanelCloseFontFamily = txInfoPanelCloseConfig.fontName;
+  const txInfoPanelArrowConfig = txInfoPanelInChatConfig.arrow;
+  const txInfoPanelArrowColor = txInfoPanelArrowConfig.color;
+  const txInfoPanelArrowFontSize = txInfoPanelArrowConfig.fontSize;
+  const txInfoPanelArrowFontFamily = txInfoPanelArrowConfig.fontName;
+  const txResolveAlignItems = (value: string | undefined, fallback: 'flex-start' | 'center' | 'flex-end'): string => {
+    const normalized = (value ?? '').toString().trim().toLowerCase();
+    if (normalized === 'left' || normalized === 'flex-start' || normalized === 'start') return 'flex-start';
+    if (normalized === 'center' || normalized === 'centre') return 'center';
+    if (normalized === 'right' || normalized === 'flex-end' || normalized === 'end') return 'flex-end';
+    return fallback;
+  };
+  const txInfoPanelLeftAlignItems = txResolveAlignItems(
+    (txInfoPanelInChatConfig as { leftSection?: { alignItems?: string } }).leftSection?.alignItems,
+    'flex-start'
+  );
+  const txInfoPanelRightAlignItems = txResolveAlignItems(
+    (txInfoPanelInChatConfig as { rightSection?: { alignItems?: string } }).rightSection?.alignItems,
+    'flex-end'
+  );
+  const txInfoPanelChainNameConfig = txInfoPanelInChatConfig.chainName;
+  const txInfoPanelTokenSymbolConfig = txInfoPanelInChatConfig.tokenSymbol;
+  const txInfoPanelTokenAmountConfig = txInfoPanelInChatConfig.tokenAmount;
+  const txInfoPanelPendingConfig = txInfoPanelInChatConfig.pendingText;
+  const txInfoPanelTokenIconsConfig = txInfoPanelInChatConfig.tokenIcons;
+  const txInfoPanelStatusTextConfig = (txInfoPanelInChatConfig as { statusText?: Record<string, unknown> }).statusText ?? {};
+  const txInfoPanelViewTxConfig = (txInfoPanelInChatConfig as { viewTransaction?: Record<string, unknown> }).viewTransaction ?? {};
+  const resolveInChatTokenIconSrc = (symbol: string): string | null => {
+    const fileType = typeof txInfoPanelTokenIconsConfig.fileType === 'string' ? txInfoPanelTokenIconsConfig.fileType : 'webp';
+    const fileSize = typeof txInfoPanelTokenIconsConfig.fileSize === 'string' ? txInfoPanelTokenIconsConfig.fileSize : '64px';
+    if (!symbol) return null;
+    return `/image/tokens/${fileType}/${fileSize}/${symbol}.${fileType}`;
+  };
+  const resolveInChatChainLabel = (chainKey: ChainKey): string => {
+    const config = (CHAIN_OPTIONS as Record<string, unknown>)[chainKey] as { transactionPanel?: { inChat?: string; sidePanel?: string } } | undefined;
+    return config?.transactionPanel?.inChat ?? String(chainKey);
+  };
+  const formatInChatAmount = (value: string): string => {
+    if (!value) return '0';
+    const num = Number(value);
+    const decimals = typeof txInfoPanelTokenAmountConfig.decimals === 'number' ? txInfoPanelTokenAmountConfig.decimals : 6;
+    if (!Number.isFinite(num)) return value;
+    return num.toFixed(decimals).replace(/\.?0+$/, '') || '0';
+  };
+  const resolveInChatExplorerUrl = (chainKey: ChainKey, txHash: string): string | null => {
+    if (!txHash) return null;
+    if (chainKey === 'SOLANA_DEVNET') return `https://solscan.io/tx/${txHash}?cluster=devnet`;
+    const explorerBase = (
+      chainKey === 'SOLANA_MAINNET' ? SOLANA_MAINNET.explorerUrl
+      : chainKey === 'ETH_MAINNET' ? ETH_MAINNET.explorerUrl
+      : chainKey === 'ETH_SEPOLIA' ? ETH_SEPOLIA.explorerUrl
+      : chainKey === 'BASE_MAINNET' ? BASE_MAINNET.explorerUrl
+      : chainKey === 'BASE_SEPOLIA' ? BASE_SEPOLIA.explorerUrl
+      : null
+    );
+    if (!explorerBase) return null;
+    return `${explorerBase.replace(/\/+$/, '')}/tx/${txHash}`;
+  };
+  const renderInChatTransactionInfoPanel = (panel: TransactionInfoPanelState, messageIndex: number) => (
+    <TransactionInfoPanel
+      panel={panel}
+      panelType="transaction-inchat"
+      width={txInfoPanelWidth}
+      paddingLeft={txInfoPanelPaddingLeft}
+      paddingRight={txInfoPanelPaddingRight}
+      paddingTop={txInfoPanelPaddingTop}
+      paddingBottom={txInfoPanelPaddingBottom}
+      closePaddingTop={txInfoPanelClosePaddingTop}
+      closePaddingRight={txInfoPanelClosePaddingRight}
+      closeSize={txInfoPanelCloseSize}
+      closeFontFamily={txInfoPanelCloseFontFamily}
+      arrowColor={txInfoPanelArrowColor}
+      arrowFontSize={txInfoPanelArrowFontSize}
+      arrowFontFamily={txInfoPanelArrowFontFamily}
+      leftAlignItems={txInfoPanelLeftAlignItems}
+      rightAlignItems={txInfoPanelRightAlignItems}
+      chainNameFontSize={txInfoPanelChainNameConfig.fontSize}
+      chainNameFontFamily={txInfoPanelChainNameConfig.fontName}
+      chainNameColor={txInfoPanelChainNameConfig.color}
+      chainNameAllCaps={Boolean(txInfoPanelChainNameConfig.allCaps)}
+      chainNameLetterSpacing={txInfoPanelChainNameConfig.letterSpacing ?? '0'}
+      chainNamePaddingBottom={txInfoPanelChainNameConfig.paddingBottom}
+      tokenSymbolFontSize={txInfoPanelTokenSymbolConfig.fontSize}
+      tokenSymbolFontFamily={txInfoPanelTokenSymbolConfig.fontName}
+      tokenSymbolColor={txInfoPanelTokenSymbolConfig.color}
+      tokenSymbolPaddingTop={txInfoPanelTokenSymbolConfig.paddingTop}
+      tokenAmountFontSize={txInfoPanelTokenAmountConfig.fontSize}
+      tokenAmountFontFamily={txInfoPanelTokenAmountConfig.fontName}
+      tokenAmountColor={txInfoPanelTokenAmountConfig.color}
+      tokenAmountDecimals={txInfoPanelTokenAmountConfig.decimals}
+      tokenAmountPaddingTop={txInfoPanelTokenAmountConfig.paddingTop}
+      pendingLabel={txInfoPanelPendingConfig.label}
+      pendingFontStyle={txInfoPanelPendingConfig.fontStyle}
+      pendingColor={txInfoPanelPendingConfig.color}
+      tokenIconSize={Number(txInfoPanelTokenIconsConfig.size)}
+      tokenIconBorderPosition={typeof txInfoPanelTokenIconsConfig.borderPosition === 'string' ? txInfoPanelTokenIconsConfig.borderPosition : 'inner'}
+      tokenIconBorderColor={typeof txInfoPanelTokenIconsConfig.borderColor === 'string' ? txInfoPanelTokenIconsConfig.borderColor : null}
+      tokenIconBorderWidth={typeof txInfoPanelTokenIconsConfig.borderWidth === 'number' ? txInfoPanelTokenIconsConfig.borderWidth : null}
+      tokenIconPlaceholderColor={typeof txInfoPanelTokenIconsConfig.placeholderColor === 'string' ? txInfoPanelTokenIconsConfig.placeholderColor : '#1F2937'}
+      tokenIconPlaceholderFontColor={typeof txInfoPanelTokenIconsConfig.placeholderFontColor === 'string' ? txInfoPanelTokenIconsConfig.placeholderFontColor : '#d1d5db'}
+      tokenIconPlaceholderFontSize={typeof txInfoPanelTokenIconsConfig.placeholderFontSize === 'number' ? txInfoPanelTokenIconsConfig.placeholderFontSize : 18}
+      tokenIconSpinEnabled={Boolean(txInfoPanelTokenIconsConfig.spin)}
+      statusExecutingLabel={typeof txInfoPanelStatusTextConfig.executingLabel === 'string' ? txInfoPanelStatusTextConfig.executingLabel : 'Executing'}
+      statusExecutedLabel={typeof txInfoPanelStatusTextConfig.executedLabel === 'string' ? txInfoPanelStatusTextConfig.executedLabel : 'Executed'}
+      statusFontSize={typeof txInfoPanelStatusTextConfig.fontSize === 'number' ? txInfoPanelStatusTextConfig.fontSize : 12}
+      statusFontFamily={typeof txInfoPanelStatusTextConfig.fontName === 'string' ? txInfoPanelStatusTextConfig.fontName : 'sans-serif'}
+      statusExecutingFontStyle={typeof txInfoPanelStatusTextConfig.executingFontStyle === 'string' ? txInfoPanelStatusTextConfig.executingFontStyle : 'italic'}
+      statusExecutedFontStyle={typeof txInfoPanelStatusTextConfig.executedFontStyle === 'string' ? txInfoPanelStatusTextConfig.executedFontStyle : 'normal'}
+      statusExecutingColor={typeof txInfoPanelStatusTextConfig.executingColor === 'string' ? txInfoPanelStatusTextConfig.executingColor : '#9ca3af'}
+      statusExecutedColor={typeof txInfoPanelStatusTextConfig.executedColor === 'string' ? txInfoPanelStatusTextConfig.executedColor : '#d1d5db'}
+      statusPaddingBottom={typeof txInfoPanelStatusTextConfig.paddingBottom === 'number' ? txInfoPanelStatusTextConfig.paddingBottom : 2}
+      viewTransactionLabel={typeof txInfoPanelViewTxConfig.label === 'string' ? txInfoPanelViewTxConfig.label : 'View Transaction'}
+      viewTransactionFontSize={typeof txInfoPanelViewTxConfig.fontSize === 'number' ? txInfoPanelViewTxConfig.fontSize : 11}
+      viewTransactionFontFamily={typeof txInfoPanelViewTxConfig.fontName === 'string' ? txInfoPanelViewTxConfig.fontName : 'sans-serif'}
+      viewTransactionColor={typeof txInfoPanelViewTxConfig.color === 'string' ? txInfoPanelViewTxConfig.color : '#60a5fa'}
+      viewTransactionHighlightColor={typeof txInfoPanelViewTxConfig.highlightColor === 'string' ? txInfoPanelViewTxConfig.highlightColor : '#93c5fd'}
+      viewTransactionPaddingTop={typeof txInfoPanelViewTxConfig.paddingTop === 'number' ? txInfoPanelViewTxConfig.paddingTop : 2}
+      viewTransactionUnderline={Boolean(txInfoPanelViewTxConfig.underline)}
+      resolveTransactionUrl={resolveInChatExplorerUrl}
+      resolveTokenIconSrc={resolveInChatTokenIconSrc}
+      resolveChainLabel={resolveInChatChainLabel}
+      formatAmount={formatInChatAmount}
+      onClose={() => {
+        setMessages((prev) => {
+          const target = prev[messageIndex];
+          if (!target) return prev;
+          const isPanelOnly = !target.content && (!target.displayContent || target.displayContent.length === 0);
+          if (isPanelOnly) {
+            return prev.filter((_, idx) => idx !== messageIndex);
+          }
+          const next = [...prev];
+          next[messageIndex] = { ...target, transactionInfoPanel: null };
+          return next;
+        });
+      }}
+    />
+  );
 
   const requestChatResponse = async (params: {
     userMessage: string;
@@ -647,7 +1246,7 @@ export default function Chat() {
         description: 'chat response',
       },
       () =>
-        fetch('/api/chat', {
+        fetch(`${backendUrl}/api/chat`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -738,14 +1337,16 @@ export default function Chat() {
     try {
       const data = await requestChatResponse({ userMessage, history: historySnapshot, clientRequestId });
       const anyIntent = extractAnyIntent(data.content);
-      const limitOrderIntent = isLimitOrderIntent(anyIntent) ? (anyIntent as ChatLimitOrderIntent) : null;
-      // Swap intent only (limit orders shouldn't go through the swap auto-exec path).
-      const intent = limitOrderIntent ? null : (anyIntent as SwapIntent | null);
+      const swapIntent =
+        anyIntent && !isLendIntent(anyIntent) && !isLimitOrderIntent(anyIntent)
+          ? (anyIntent as ChatSwapIntent)
+          : null;
 
-      // Dispatch swap-initiated event when AI generates a swap intent
-      if (intent && intent.type) {
-        const selectedChain = resolveIntentChain(intent);
-        
+      // Dispatch swap-initiated event only for swap-shaped intents (lend + limit orders use their own paths)
+      if (swapIntent && swapIntent.type) {
+        const selectedChain = resolveIntentChain(swapIntent);
+
+
         // Helper to normalize chain string to ChainKey
         const normalizeToChainKey = (chainStr: string | null | undefined, fallback: ChainKey): ChainKey => {
           if (!chainStr) return fallback;
@@ -755,31 +1356,31 @@ export default function Chat() {
           if (chainKeys.includes(normalized as ChainKey)) return normalized as ChainKey;
           return fallback;
         };
-        
+
         dispatchSwapInitiated({
-          sellToken: intent.sell?.toUpperCase() || '',
-          buyToken: intent.buy?.toUpperCase() || '',
-          sellChain: normalizeToChainKey(intent.sellTokenChain, selectedChain),
-          buyChain: normalizeToChainKey(intent.buyTokenChain, selectedChain),
-          amount: intent.amount?.toString() || '',
-          intentType: intent.type,
+          sellToken: swapIntent.sell?.toUpperCase() || '',
+          buyToken: swapIntent.buy?.toUpperCase() || '',
+          sellChain: normalizeToChainKey(swapIntent.sellTokenChain, selectedChain),
+          buyChain: normalizeToChainKey(swapIntent.buyTokenChain, selectedChain),
+          amount: swapIntent.amount?.toString() || '',
+          intentType: swapIntent.type,
           timestamp: Date.now(),
         });
       }
-      
-      if (intent && intent.type === 'SINGLE_CHAIN_SWAP_INTENT') {
-        await prefetchSolanaTokensForIntent(intent);
+
+      if (swapIntent && swapIntent.type === 'SINGLE_CHAIN_SWAP_INTENT') {
+        await prefetchSolanaTokensForIntent(swapIntent);
       }
 
       let executionNote: string | null = null;
       if (allowAutoExecution) {
-        executionNote = await maybeExecuteSwapIntent(intent, data?.cid ?? null, userMessage);
+        executionNote = await maybeExecuteSwapIntent(anyIntent, data?.cid ?? null, userMessage);
       }
 
       const chatButtonRow = executionNote
         ? null
         : buildChatButtonRowFromIntent({
-            intent: limitOrderIntent ?? intent,
+            intent: anyIntent,
             cid: data?.cid ?? null,
           });
 
@@ -859,15 +1460,16 @@ export default function Chat() {
 
     try {
       if (button.action.kind === 'RUN_LOCAL') {
-        // For limit orders we delay the "live" confirmation until after the
-        // execution promise resolves, so we don't show success before we know
-        // the order was actually accepted.
+        const isLendRowTemplate = (template: ChatButtonRowModel['template']): template is 'CONFIRM_LEND_DEPOSIT' | 'CONFIRM_LEND_WITHDRAW' =>
+          template === 'CONFIRM_LEND_DEPOSIT' || template === 'CONFIRM_LEND_WITHDRAW';
         const instantMessage = button.action.actionId === 'CONFIRM_SWAP'
           ? getRandomSwapSubmittedMessage()
-          : button.action.actionId === 'CONFIRM_LIMIT_ORDER'
-            ? null
-            : button.action.presetAssistantMessage;
-        if (instantMessage) addInstantAssistantMessage(instantMessage);
+          : isLendRowTemplate(row.template)
+            ? getRandomLendSubmittedMessage(row.template)
+            : button.action.actionId === 'CONFIRM_LIMIT_ORDER'
+              ? getRandomLimitOrderSubmittedMessage()
+              : button.action.presetAssistantMessage;
+        addInstantAssistantMessage(instantMessage);
         if (button.action.actionId === 'CANCEL_SWAP') {
           setPendingIntent(null);
           console.log('[ChatButtonRow] action cancel swap', { rowId: row.id });
@@ -883,59 +1485,32 @@ export default function Chat() {
             addInstantAssistantMessage('Limit order intent was lost — please re-issue the order.');
             return;
           }
-          const limitIntent = intent as ChatLimitOrderIntent;
-
-          // Pre-flight: check the user has enough of the sell token.
-          const balanceError = await checkSolanaTokenBalance(limitIntent.sell, limitIntent.amount);
-          if (balanceError) {
-            addInstantAssistantMessage(balanceError);
-            return;
-          }
-
-          // For time-triggered orders the server needs to sign on the user's
-          // behalf when the scheduled time arrives. Request Privy wallet
-          // delegation now — right before confirming — so the user understands
-          // exactly why the permission is needed. Privy is idempotent: if the
-          // wallet is already delegated this resolves immediately without a
-          // prompt, so repeat orders never re-trigger the UI.
-          if (limitIntent.type === 'LIMIT_ORDER_TIME_INTENT') {
-            const solanaAddress = solanaWallets?.[0]?.address;
-            if (!solanaAddress) {
-              addInstantAssistantMessage('No Solana wallet connected. Please connect your wallet first.');
-              return;
-            }
-            try {
-              await delegateWallet({ address: solanaAddress, chainType: 'solana' });
-            } catch (delegateErr) {
-              const msg = delegateErr instanceof Error ? delegateErr.message : String(delegateErr);
-              // User rejected the delegation prompt — don't schedule the order.
-              addInstantAssistantMessage(
-                `Scheduled orders require a one-time permission so Altair can execute the trade on your behalf when the time arrives. ${msg}`
-              );
-              return;
-            }
-          }
-
           try {
-            const result = await executeLimitOrder(limitIntent, {
+            const result = await executeLimitOrder(intent as ChatLimitOrderIntent, {
               CID: row.context?.cid ?? null,
             });
-            // Only show success message once execution has confirmed.
-            const submitted = getRandomLimitOrderSubmittedMessage();
             const tail = result.kind === 'time'
-              ? `Scheduled for ${limitIntent.runAt ?? 'the requested time'}.`
-              : `Trigger at ${limitIntent.targetPrice} ${(limitIntent.quoteCurrency ?? 'USDC').toUpperCase()}/${limitIntent.sell.toUpperCase()}.`;
+              ? `Scheduled for ${intent.runAt ?? 'the requested time'}.`
+              : `Trigger at ${intent.targetPrice} ${(intent.quoteCurrency ?? 'USDC').toUpperCase()}/${intent.sell.toUpperCase()}.`;
             const txTail = result.txHash ? ` tx ${result.txHash.slice(0, 8)}…` : '';
-            addInstantAssistantMessage(`${submitted} ${tail}${txTail}`);
+            addInstantAssistantMessage(`${tail}${txTail}`);
           } catch (err) {
-            const raw = err instanceof Error ? err.message : String(err);
-            addInstantAssistantMessage(friendlyLimitOrderError(raw));
+            const msg = err instanceof Error ? err.message : String(err);
+            addInstantAssistantMessage(`Limit order failed: ${msg}`);
           }
           return;
         }
         if (button.action.actionId === 'CONFIRM_SWAP') {
           const intent = row.context?.intent as ExecutableSwapIntent | null | undefined;
           if (!intent) return;
+          const confirmedMeta = deriveConfirmedSwapMeta(intent);
+          if (confirmedMeta) {
+            dispatchSwapConfirmed({
+              ...confirmedMeta,
+              intentId: row.context?.cid ?? null,
+              timestamp: Date.now(),
+            });
+          }
           const execution = await executeIntentNow(intent, row.context?.cid ?? null);
           if (execution) {
             const swapFollowupRow = buildChatButtonRowFromLogicTrigger({
@@ -943,13 +1518,29 @@ export default function Chat() {
               intent,
               cid: row.context?.cid ?? null,
             });
-            appendToLatestAssistantMessageWithRow({
-              content: execution,
-              chatButtonRow: swapFollowupRow,
-            });
+            addInstantAssistantMessage(execution, { chatButtonRow: swapFollowupRow });
             if (swapFollowupRow) {
               setOnlyLatestActiveRow(swapFollowupRow.id);
             }
+          }
+          return;
+        }
+
+        if (button.action.actionId === 'CANCEL_LEND_DEPOSIT' || button.action.actionId === 'CANCEL_LEND_WITHDRAW') {
+          setPendingIntent(null);
+          console.log('[ChatButtonRow] action cancel lend', { rowId: row.id, actionId: button.action.actionId });
+          return;
+        }
+
+        if (button.action.actionId === 'CONFIRM_LEND_DEPOSIT' || button.action.actionId === 'CONFIRM_LEND_WITHDRAW') {
+          const lendIntent = row.context?.intent;
+          if (!lendIntent || !isLendIntent(lendIntent)) return;
+          const execution = await executeLendIntentNow(lendIntent, row.context?.cid ?? null);
+          if (execution) {
+            appendToLatestAssistantMessageWithRow({
+              content: execution,
+              chatButtonRow: null,
+            });
           }
           return;
         }
@@ -1040,41 +1631,47 @@ export default function Chat() {
                 <SpinningLogo src={logoAsset} alt="Altair" className="h-9 w-9 object-contain" />
               </div>
               <div className="flex w-full flex-col items-start">
-                <div
-                  className="px-4 py-2 rounded-2xl text-sm whitespace-pre-wrap break-words"
-                  style={{
-                    backgroundColor: CHAT_PANEL.agent_chat_container_color,
-                    color: CHAT_PANEL.agent_chat_text_color,
-                    width: CHAT_PANEL.agentChatWidth,
-                    overflowWrap: 'break-word',
-                    wordBreak: 'normal',
-                  }}
-                >
-                  {m.role === 'assistant' ? (m.displayContent ?? '') : m.content}
-                {m.chatButtonRow && (
-                  <ChatButtonRow
-                    row={m.chatButtonRow}
-                    disabled={isLoading || isExecutingSwap}
-                    onAction={handleChatButtonRowAction}
-                  />
-                  )}
-                </div>
-                {m.zgHash && !m.zgError && (
-                  <div className="flex items-center gap-2 mt-1">
-                    <a 
-                      href={`https://scan-testnet.0g.ai/tx/${m.zgHash}`} 
-                      target="_blank"
-                      className="flex items-center gap-1 text-[10px] text-green-500 hover:underline"
+                {m.transactionInfoPanel && (!m.displayContent || m.displayContent.length === 0) && !m.content ? (
+                  txInfoPanelInChatEnabled ? renderInChatTransactionInfoPanel(m.transactionInfoPanel, i) : null
+                ) : (
+                  <>
+                    <div
+                      className="px-4 py-2 rounded-2xl text-sm whitespace-pre-wrap break-words"
+                      style={{
+                        backgroundColor: CHAT_PANEL.agent_chat_container_color,
+                        color: CHAT_PANEL.agent_chat_text_color,
+                        width: CHAT_PANEL.agentChatWidth,
+                        overflowWrap: 'break-word',
+                        wordBreak: 'normal',
+                      }}
                     >
-                      <ShieldCheck className="w-3 h-3" />
-                      Verified by 0g
-                    </a>
-                  </div>
-                )}
-                {m.zgError && (
-                  <div className="flex items-center gap-2 mt-1 text-[10px] text-yellow-400">
-                    0G upload failed
-                  </div>
+                      {m.role === 'assistant' ? (m.displayContent ?? '') : m.content}
+                    {m.chatButtonRow && (
+                      <ChatButtonRow
+                        row={m.chatButtonRow}
+                        disabled={isLoading || isExecutingSwap}
+                        onAction={handleChatButtonRowAction}
+                      />
+                      )}
+                    </div>
+                    {m.zgHash && !m.zgError && (
+                      <div className="flex items-center gap-2 mt-1">
+                        <a
+                          href={`https://scan-testnet.0g.ai/tx/${m.zgHash}`}
+                          target="_blank"
+                          className="flex items-center gap-1 text-[10px] text-green-500 hover:underline"
+                        >
+                          <ShieldCheck className="w-3 h-3" />
+                          Verified by 0g
+                        </a>
+                      </div>
+                    )}
+                    {m.zgError && (
+                      <div className="flex items-center gap-2 mt-1 text-[10px] text-yellow-400">
+                        0G upload failed
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             </div>

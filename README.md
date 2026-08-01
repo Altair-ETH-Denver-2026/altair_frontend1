@@ -60,8 +60,8 @@ Wallet display mode is configured in [`config/ui_config.ts`](config/ui_config.ts
 - Solana swap: [`src/lib/useSolanaSwap.ts`](src/lib/useSolanaSwap.ts)
 - Solana transfer: [`src/lib/useSolanaTransfer.ts`](src/lib/useSolanaTransfer.ts)
 - Cross-chain relay: [`src/lib/useRelay.ts`](src/lib/useRelay.ts)
-- Jupiter Trigger V1 (legacy fallback): [`src/lib/useJupiterTrigger.ts`](src/lib/useJupiterTrigger.ts)
-- Jupiter Trigger V2 (default for price orders): [`src/lib/useJupiterTriggerV2.ts`](src/lib/useJupiterTriggerV2.ts) + [`src/lib/useTriggerV2Auth.ts`](src/lib/useTriggerV2Auth.ts) + [`src/lib/triggerV2Jwt.ts`](src/lib/triggerV2Jwt.ts)
+- Jupiter Lend (Earn) deposit/withdraw: [`src/lib/useJupiterLend.ts`](src/lib/useJupiterLend.ts)
+- Jupiter Trigger (limit / scheduled orders): [`src/lib/useJupiterTrigger.ts`](src/lib/useJupiterTrigger.ts)
 
 These hooks execute chain actions and emit `altair:swap-complete` (or `altair:balance-stale`) to drive wallet/balance UI updates.
 
@@ -69,23 +69,20 @@ These hooks execute chain actions and emit `altair:swap-complete` (or `altair:ba
 
 When the user says "sell 100 BONK if price hits $0.00003" or "swap 1 SOL to USDC at 6pm tomorrow", the chat model emits a `LIMIT_ORDER_PRICE_INTENT` or `LIMIT_ORDER_TIME_INTENT` (see `INTENTS.LIMIT_ORDER_INTENTS` in `config/ai_config.ts`). The chat panel renders a Place Order / Cancel row (template `CONFIRM_LIMIT_ORDER`). On confirm, [`useJupiterTrigger.executeLimitOrder(...)`](src/lib/useJupiterTrigger.ts):
 
-- For **price** orders: routes through Jupiter Trigger **V2** by default (vault-based custody, real `orderId` returned up-front, no per-fill user prompts). See "Trigger V2 flow" below. Falls back to V1 if `NEXT_PUBLIC_DISABLE_TRIGGER_V2=true` is set, so V2 can be killed remotely without a redeploy if Jupiter has an incident.
-- For **time** orders: skips Jupiter (the time scheduler runs server-side via Privy delegated signing) and only writes back to `/api/limit-orders`.
+- For **price** orders: calls the Jupiter Trigger V1 proxy `/api/jupiter/trigger/create-order`, Privy signs+sends the order tx, then the frontend writes back to `/api/limit-orders` with the trigger config.
+- For **time** orders: skips Jupiter (the server-side scheduler is a follow-up) and only writes back to `/api/limit-orders` so the order is tracked and the chat model can remind the user about it.
 
-The **LimitOrdersPanel** ([`src/components/panels/LimitOrdersPanel.tsx`](src/components/panels/LimitOrdersPanel.tsx)) shows pending orders for the connected Solana wallet and lets the user cancel them. Open it via the **List** icon in the top menu (next to the wallet panel). Cancel routing depends on `providerVersion`:
+The **LimitOrdersPanel** ([`src/components/panels/LimitOrdersPanel.tsx`](src/components/panels/LimitOrdersPanel.tsx)) shows pending orders for the connected Solana wallet and lets the user cancel them. Open it via the **List** icon in the top menu (next to the wallet panel). Today this lists Altair's Mongo-tracked orders; cross-referencing with `/api/jupiter/trigger/orders` for fill status is a follow-up.
 
-- **V1**: PATCH `/api/limit-orders/[LOID]` `{status:'cancelled'}` — soft cancel only (no V1 cancel endpoint is hit because we don't have the create-tx reliably).
-- **V2**: Full 2-step cancel — POST `/api/jupiter/trigger-v2/orders/price/cancel/[orderId]` returns an unsigned withdrawal tx, Privy signs it, then POST `…/confirm-cancel/[orderId]` submits it. Jupiter moves the order to `ready_to_cancel` immediately on step 1, so there's no fill race while the user signs. Finally, our local row is PATCHed with `status='cancelled'` + the withdrawal `fillTxHash`.
+### 4) Jupiter Lend (Earn) chat flow
 
-#### Trigger V2 flow (price orders)
+When the user says "lend 10 USDC" or "withdraw my lent USDC", the chat model emits a `LEND_DEPOSIT_INTENT` / `LEND_WITHDRAW_INTENT` (see `INTENTS.LEND_INTENTS` in `config/ai_config.ts`). The chat panel renders a Confirm / Cancel row (templates `CONFIRM_LEND_DEPOSIT` / `CONFIRM_LEND_WITHDRAW`). On confirm, [`useJupiterLend.executeLend(...)`](src/lib/useJupiterLend.ts) calls the backend proxy, Privy signs+sends the Solana tx, then the frontend writes back to `/api/lend-positions`. Today only Solana mainnet is supported. See [`../LEND_PLAN.md`](../LEND_PLAN.md) for the full design.
 
-1. **JWT** — first price-order placement (or first cancel) per Solana wallet calls `useTriggerV2Auth.ensureJwt()`, which runs challenge → Privy `useSignMessage` → verify. The JWT is cached in-memory for 24h via `src/lib/triggerV2Jwt.ts`; subsequent V2 calls within that window are silent. We deliberately do NOT persist the JWT to `localStorage` — re-authenticating is one signMessage prompt.
-2. **Deposit craft** — POST `/api/jupiter/trigger-v2/deposit/craft` returns an unsigned `VersionedTransaction` that moves the sell amount from the user's wallet to their Privy-managed vault.
-3. **Sign** — Privy `useSignTransaction` prompts the user once. The deposit tx is signed but not yet broadcast.
-4. **Create order** — POST `/api/jupiter/trigger-v2/orders/price` with `depositSignedTx` + `triggerCondition` + `triggerPriceUsd` + `expiresAt`. Jupiter submits the deposit on-chain AND registers the order in one round trip; response is `{ id, txSignature }`.
-5. **Writeback** — `/api/limit-orders` POST with `providerVersion: 'v2'`, `depositRequestId`, `vaultPubkey`, V2 trigger fields, and `providerOrderId = id` (the real Jupiter UUID, so future sync-fills can match exactly).
+### 5) Jupiter Lend panel + wallet integration
 
-V2 derives `triggerCondition` from intent `side`: SELL → `above`, BUY → `below`. Expiry defaults to 7 days out if `intent.expiry` is absent (Jupiter V2 requires every order to have a future `expiresAt`).
+- A dedicated **LendPanel** ([`src/components/panels/LendPanel.tsx`](src/components/panels/LendPanel.tsx)) renders markets (with APY) and the user's active positions. Each market has an inline deposit form; each position has a "Withdraw All" button (uses the `/redeem` flow under the hood for clean closeout including accrued yield). Open it via the **Lend** (Coins) icon in the top menu — it appears next to the wallet panel.
+- The **wallet panel** ([`src/components/panels/WalletPanel.tsx`](src/components/panels/WalletPanel.tsx)) gets a "Lent · Jupiter · X% APY" sub-row beneath any token (e.g. USDC) that the user is currently lending on Solana. Click the sub-row to open the LendPanel.
+- Position + market data is fetched and cached by [`src/lib/useLendPositions.ts`](src/lib/useLendPositions.ts), which auto-refreshes after `altair:swap-complete` events whose `sellToken` or `buyToken` starts with `LEND:`.
 
 ---
 
