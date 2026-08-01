@@ -13,8 +13,11 @@ import { usePanels } from '../lib/usePanels';
 import { getCachedPrivyAccessToken } from '../lib/privyTokenCache';
 import { getBackendBaseUrl } from '../lib/backendUrl';
 import { PublicKey } from '@solana/web3.js';
-import { UserRound, LogOut, Settings, Wallet, Wrench, Copy, Globe2, Check } from 'lucide-react';
+import { UserRound, LogOut, Settings, Wallet, Wrench, Copy, Globe2, Check, Coins, ListOrdered } from 'lucide-react';
 import WalletPanel from './panels/WalletPanel';
+import LendPanel from './panels/LendPanel';
+import LimitOrdersPanel from './panels/LimitOrdersPanel';
+import { useLendPositions } from '../lib/useLendPositions';
 import AddPanel from './panels/AddPanel';
 import TransactionInfoPanel from './panels/TransactionInfoPanel';
 import { SpinningLogo } from './SpinningLogo';
@@ -71,6 +74,9 @@ export default function UserMenu() {
     closeTransactionInfoPanel,
   } = usePanels({ initialChain: selectedChain });
   const [isDevOpen, setIsDevOpen] = useState(false);
+  const [isLendPanelOpen, setIsLendPanelOpen] = useState(false);
+  const lendData = useLendPositions({ enabled: true });
+  const [isLimitOrdersPanelOpen, setIsLimitOrdersPanelOpen] = useState(false);
   const [isSwapping, setIsSwapping] = useState(false);
   const [swapMessage, setSwapMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [balancesByChain, setBalancesByChain] = useState<Record<ChainKey, ApiChainBalances>>({} as Record<ChainKey, ApiChainBalances>);
@@ -2153,6 +2159,63 @@ export default function UserMenu() {
 
   const renderBalances = (chainKey: ChainKey | 'ALL') => {
     const rows = resolveTokenRows(chainKey);
+    const lendSubRowFor = (sym: string): React.ReactNode => {
+      // Today Jupiter Lend Earn is Solana-only; show "Lent" sub-row when current
+      // wallet panel chain is Solana (or "ALL") and the user holds a position in this symbol.
+      if (chainKey !== 'SOLANA_MAINNET' && chainKey !== 'ALL') return null;
+      const upperSym = sym.toUpperCase();
+      const match = lendData.positions.find(
+        (p) => p.token?.symbol?.toUpperCase() === upperSym
+      );
+      if (!match) return null;
+      const decimals = match.token?.decimals ?? 6;
+      const raw = match.underlyingAmountRaw ?? match.principalRaw ?? '0';
+      if (raw === '0') return null;
+      // Reuse same number formatter pattern as token balance row.
+      const formatRaw = (input: string): string => {
+        try {
+          const big = BigInt(input);
+          const negative = big < 0n;
+          const abs = negative ? -big : big;
+          const divisor = 10n ** BigInt(Math.max(0, decimals));
+          const whole = abs / divisor;
+          const frac = abs % divisor;
+          if (decimals === 0) return whole.toString();
+          const fracStr = frac
+            .toString()
+            .padStart(decimals, '0')
+            .slice(0, tokenBalanceDecimals)
+            .replace(/0+$/, '');
+          return `${negative ? '-' : ''}${whole.toString()}${fracStr ? '.' + fracStr : ''}`;
+        } catch {
+          return input;
+        }
+      };
+      const apy = typeof match.apySnapshot === 'number'
+        ? (match.apySnapshot > 1 ? match.apySnapshot : match.apySnapshot * 100).toFixed(2)
+        : null;
+      return (
+        <div
+          className="flex w-full items-center pl-6"
+          style={{
+            paddingLeft: `${containerPaddingLeft + 14}px`,
+            paddingRight: `${containerPaddingRight}px`,
+            paddingTop: '2px',
+            paddingBottom: '4px',
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => setIsLendPanelOpen(true)}
+            className="flex w-full items-center justify-between text-[11px] text-emerald-300 hover:text-emerald-200 cursor-pointer"
+            title="Open Lend panel"
+          >
+            <span className="opacity-80">↳ Lent · Jupiter{apy ? ` · ${apy}% APY` : ''}</span>
+            <span className="tabular-nums">{formatRaw(raw)} {upperSym}</span>
+          </button>
+        </div>
+      );
+    };
     return rows.map((symbol, index) => {
       const balanceValue = resolveBalanceForSymbol(chainKey, symbol);
       const tokenPrice = resolveTokenPriceForSymbol(chainKey, symbol);
@@ -2262,6 +2325,7 @@ export default function UserMenu() {
               </span>
             ) : null}
           </div>
+          {lendSubRowFor(symbol)}
           {index < rows.length - 1 ? <div className="h-[1px] bg-gray-700 w-full" /> : null}
         </React.Fragment>
       );
@@ -2654,6 +2718,11 @@ export default function UserMenu() {
           void fetchBalancesForChain(chainKey, { forceRefresh: false, skipNetworkIfCached: true }, 'changeChain');
         }
       }}
+      onOpenLend={() => {
+        setIsLendPanelOpen((prev) => !prev);
+        if (!isWalletPanelOpen) setIsWalletPanelOpen(true);
+      }}
+      isLendOpen={isLendPanelOpen}
     />
   );
 
@@ -3337,14 +3406,82 @@ export default function UserMenu() {
               {renderWalletPanel(panel)}
             </React.Fragment>
           ))}
+          {isAddPanelOpen ? renderAddPanel() : null}
+          {isLendPanelOpen ? (
+            <LendPanel
+              width={walletWidth}
+              onClose={() => setIsLendPanelOpen(false)}
+            />
+          ) : null}
+          {isLimitOrdersPanelOpen ? (
+            <LimitOrdersPanel
+              width={walletWidth}
+              onClose={() => setIsLimitOrdersPanelOpen(false)}
+            />
+          ) : null}
           {txInfoPanelShowInSidePanel && transactionInfoPanels.map((panel) => (
             <React.Fragment key={`tx-${panel.id}`}>
               {renderTransactionInfoPanel(panel)}
             </React.Fragment>
           ))}
-          {isWalletPanelOpen && isAddPanelOpen ? renderAddPanel() : null}
         </div>
       )}
+
+      {/* Lend toggle (opens LendPanel beside wallet panels) */}
+      {isWalletPanel ? (
+        <button
+          onClick={() => {
+            const next = !isLendPanelOpen;
+            setIsLendPanelOpen(next);
+            if (next && !isWalletPanelOpen) setIsWalletPanelOpen(true);
+          }}
+          title="Lend (Jupiter Earn · Solana)"
+          className="flex items-center justify-center rounded-full border-[var(--border-color)] hover:border-[var(--highlight-color)] transition-all shadow-md cursor-pointer"
+          style={{
+            width: `${MENU_ICONS.size * 4 * 1.6}px`,
+            height: `${MENU_ICONS.size * 4 * 1.6}px`,
+            backgroundColor: MENU_ICONS.container_color,
+            borderColor: isLendPanelOpen ? MENU_ICONS.highlight_color : undefined,
+            borderWidth: `${MENU_ICONS.border_width}px`,
+            boxSizing: 'content-box',
+            ['--border-color' as never]: MENU_ICONS.border_color,
+            ['--highlight-color' as never]: MENU_ICONS.highlight_color,
+          }}
+        >
+          <Coins
+            style={{ width: `${MENU_ICONS.size * 4}px`, height: `${MENU_ICONS.size * 4}px` }}
+            color={MENU_ICONS.icon_color}
+          />
+        </button>
+      ) : null}
+
+      {/* Limit Orders toggle */}
+      {isWalletPanel ? (
+        <button
+          onClick={() => {
+            const next = !isLimitOrdersPanelOpen;
+            setIsLimitOrdersPanelOpen(next);
+            if (next && !isWalletPanelOpen) setIsWalletPanelOpen(true);
+          }}
+          title="Limit Orders (Jupiter Trigger · Solana)"
+          className="flex items-center justify-center rounded-full border-[var(--border-color)] hover:border-[var(--highlight-color)] transition-all shadow-md cursor-pointer"
+          style={{
+            width: `${MENU_ICONS.size * 4 * 1.6}px`,
+            height: `${MENU_ICONS.size * 4 * 1.6}px`,
+            backgroundColor: MENU_ICONS.container_color,
+            borderColor: isLimitOrdersPanelOpen ? MENU_ICONS.highlight_color : undefined,
+            borderWidth: `${MENU_ICONS.border_width}px`,
+            boxSizing: 'content-box',
+            ['--border-color' as never]: MENU_ICONS.border_color,
+            ['--highlight-color' as never]: MENU_ICONS.highlight_color,
+          }}
+        >
+          <ListOrdered
+            style={{ width: `${MENU_ICONS.size * 4}px`, height: `${MENU_ICONS.size * 4}px` }}
+            color={MENU_ICONS.icon_color}
+          />
+        </button>
+      ) : null}
 
       {/* Profile dropdown */}
       <div className="relative">
