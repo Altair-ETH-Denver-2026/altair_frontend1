@@ -13,6 +13,7 @@ import { useSolanaSwap } from '../lib/useSolanaSwap';
 import { useRelay } from '../lib/useRelay';
 import { useJupiterLend } from '../lib/useJupiterLend';
 import { useJupiterTrigger } from '../lib/useJupiterTrigger';
+import { useJupiterTriggerV2 } from '../lib/useJupiterTriggerV2';
 import { getCachedPrivyAccessToken } from '../lib/privyTokenCache';
 import { dispatchSwapInitiated, dispatchSwapConfirmed } from '../lib/eventTypes';
 import { BLOCKCHAIN, CHAINS, type ChainKey } from '../../config/blockchain_config';
@@ -169,11 +170,7 @@ export default function Chat() {
   };
 
   const { wallets: evmWallets } = useWallets();
-  const executeSwap = useSwap();
-  const executeSolanaSwap = useSolanaSwap();
-  const executeRelay = useRelay();
   const { executeLend } = useJupiterLend();
-  const { executeLimitOrder } = useJupiterTrigger();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -250,25 +247,6 @@ export default function Chat() {
     return null;
   };
 
-  /**
-   * Generic intent extractor. Returns either a swap intent OR a limit-order intent.
-   * Used for routing: any actionable intent → CONFIRM button row.
-   */
-  const extractAnyIntent = (text: string): ChatActionableIntent | null => {
-    const parsed = extractSwapIntent(text) as unknown as Record<string, unknown> | null;
-    if (!parsed || typeof parsed !== 'object') return null;
-    if (isLimitOrderIntent(parsed)) return parsed as ChatLimitOrderIntent;
-    if (
-      parsed.type === 'SINGLE_CHAIN_SWAP_INTENT' ||
-      parsed.type === 'CROSS_CHAIN_SWAP_INTENT' ||
-      parsed.type === 'BRIDGE_INTENT'
-    ) {
-      return parsed as unknown as ChatSwapIntent;
-    }
-    return null;
-  };
-
-  const extractIntentJsonSlice = (text: string): { intent: SwapIntent; start: number; end: number } | null => {
   /** Back-compat wrapper that only returns swap-shaped intents (lend + limit-order intents are filtered out). */
   const extractSwapIntent = (text: string): SwapIntent | null => {
     const intent = extractAnyIntent(text);
@@ -1462,14 +1440,17 @@ export default function Chat() {
       if (button.action.kind === 'RUN_LOCAL') {
         const isLendRowTemplate = (template: ChatButtonRowModel['template']): template is 'CONFIRM_LEND_DEPOSIT' | 'CONFIRM_LEND_WITHDRAW' =>
           template === 'CONFIRM_LEND_DEPOSIT' || template === 'CONFIRM_LEND_WITHDRAW';
+        // For limit orders we delay the "live" confirmation until after the
+        // execution promise resolves, so we don't show success before we know
+        // the order was actually accepted.
         const instantMessage = button.action.actionId === 'CONFIRM_SWAP'
           ? getRandomSwapSubmittedMessage()
           : isLendRowTemplate(row.template)
             ? getRandomLendSubmittedMessage(row.template)
             : button.action.actionId === 'CONFIRM_LIMIT_ORDER'
-              ? getRandomLimitOrderSubmittedMessage()
+              ? null
               : button.action.presetAssistantMessage;
-        addInstantAssistantMessage(instantMessage);
+        if (instantMessage) addInstantAssistantMessage(instantMessage);
         if (button.action.actionId === 'CANCEL_SWAP') {
           setPendingIntent(null);
           console.log('[ChatButtonRow] action cancel swap', { rowId: row.id });
@@ -1485,18 +1466,53 @@ export default function Chat() {
             addInstantAssistantMessage('Limit order intent was lost — please re-issue the order.');
             return;
           }
+          const limitIntent = intent as ChatLimitOrderIntent;
+
+          // Pre-flight: check the user has enough of the sell token.
+          const balanceError = await checkSolanaTokenBalance(limitIntent.sell, limitIntent.amount);
+          if (balanceError) {
+            addInstantAssistantMessage(balanceError);
+            return;
+          }
+
+          // For time-triggered orders the server needs to sign on the user's
+          // behalf when the scheduled time arrives. Request Privy wallet
+          // delegation now — right before confirming — so the user understands
+          // exactly why the permission is needed. Privy is idempotent: if the
+          // wallet is already delegated this resolves immediately without a
+          // prompt, so repeat orders never re-trigger the UI.
+          if (limitIntent.type === 'LIMIT_ORDER_TIME_INTENT') {
+            const solanaAddress = solanaWallets?.[0]?.address;
+            if (!solanaAddress) {
+              addInstantAssistantMessage('No Solana wallet connected. Please connect your wallet first.');
+              return;
+            }
+            try {
+              await delegateWallet({ address: solanaAddress, chainType: 'solana' });
+            } catch (delegateErr) {
+              const msg = delegateErr instanceof Error ? delegateErr.message : String(delegateErr);
+              // User rejected the delegation prompt — don't schedule the order.
+              addInstantAssistantMessage(
+                `Scheduled orders require a one-time permission so Altair can execute the trade on your behalf when the time arrives. ${msg}`
+              );
+              return;
+            }
+          }
+
           try {
-            const result = await executeLimitOrder(intent as ChatLimitOrderIntent, {
+            const result = await executeLimitOrder(limitIntent, {
               CID: row.context?.cid ?? null,
             });
+            // Only show success message once execution has confirmed.
+            const submitted = getRandomLimitOrderSubmittedMessage();
             const tail = result.kind === 'time'
-              ? `Scheduled for ${intent.runAt ?? 'the requested time'}.`
-              : `Trigger at ${intent.targetPrice} ${(intent.quoteCurrency ?? 'USDC').toUpperCase()}/${intent.sell.toUpperCase()}.`;
+              ? `Scheduled for ${limitIntent.runAt ?? 'the requested time'}.`
+              : `Trigger at ${limitIntent.targetPrice} ${(limitIntent.quoteCurrency ?? 'USDC').toUpperCase()}/${limitIntent.sell.toUpperCase()}.`;
             const txTail = result.txHash ? ` tx ${result.txHash.slice(0, 8)}…` : '';
-            addInstantAssistantMessage(`${tail}${txTail}`);
+            addInstantAssistantMessage(`${submitted} ${tail}${txTail}`);
           } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            addInstantAssistantMessage(`Limit order failed: ${msg}`);
+            const raw = err instanceof Error ? err.message : String(err);
+            addInstantAssistantMessage(friendlyLimitOrderError(raw));
           }
           return;
         }

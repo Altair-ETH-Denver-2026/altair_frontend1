@@ -46,7 +46,11 @@ describe('triggerV2Jwt — getOrFetchJwt round trip', () => {
       }
       return { ok: false, status: 404, body: { error: 'unexpected' } };
     });
-    const signMessage = vi.fn(async () => new Uint8Array([1, 2, 3, 4]));
+    // Typed to match getOrFetchJwt's `signMessage` contract so `mock.calls[0][0]`
+    // is inferred as the challenge bytes rather than an empty tuple.
+    const signMessage = vi.fn<(challengeBytes: Uint8Array) => Promise<Uint8Array>>(
+      async () => new Uint8Array([1, 2, 3, 4])
+    );
 
     const mod = await importModule();
     const token = await mod.getOrFetchJwt({
