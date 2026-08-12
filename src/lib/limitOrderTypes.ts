@@ -56,6 +56,10 @@ export type LimitOrderRow = {
     quoteCurrency?: string | null;
     runAt?: string | null;
     expiresAt?: string | null;
+    // V2-only
+    triggerCondition?: 'above' | 'below' | null;
+    triggerPriceUsd?: number | null;
+    expiresAtMs?: number | null;
   };
   providerOrderId?: string | null;
   fillTxHash?: string | null;
@@ -64,4 +68,9 @@ export type LimitOrderRow = {
   intentString?: string;
   updatedAt?: string;
   createdAt?: string;
+  // V2-only
+  providerVersion?: 'v1' | 'v2' | null;
+  depositRequestId?: string | null;
+  vaultPubkey?: string | null;
+  retryCount?: number;
 };

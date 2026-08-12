@@ -4,7 +4,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { SpinningLogo } from './SpinningLogo';
 import { ShieldCheck, Send, Loader2 } from 'lucide-react';
 import { useLogoAsset } from '../lib/logo';
-import { usePrivy } from '@privy-io/react-auth';
+import { usePrivy, useDelegatedActions } from '@privy-io/react-auth';
 import { useWallets as useSolanaWallets } from '@privy-io/react-auth/solana';
 import { withWaitLogger } from '../lib/waitLogger';
 import { getBackendBaseUrl } from '../lib/backendUrl';
@@ -13,6 +13,7 @@ import { useSolanaSwap } from '../lib/useSolanaSwap';
 import { useRelay } from '../lib/useRelay';
 import { useJupiterLend } from '../lib/useJupiterLend';
 import { useJupiterTrigger } from '../lib/useJupiterTrigger';
+import { useJupiterTriggerV2 } from '../lib/useJupiterTriggerV2';
 import { getCachedPrivyAccessToken } from '../lib/privyTokenCache';
 import { dispatchSwapInitiated, dispatchSwapConfirmed } from '../lib/eventTypes';
 import { BLOCKCHAIN, CHAINS, type ChainKey } from '../../config/blockchain_config';
@@ -71,12 +72,105 @@ const isMissingSolanaToken = (symbol: string) => {
 export default function Chat() {
   const { authenticated, getAccessToken } = usePrivy();
   const { wallets: solanaWallets } = useSolanaWallets();
-  const { wallets: evmWallets } = useWallets();
+  const { delegateWallet } = useDelegatedActions();
   const executeSwap = useSwap();
   const executeSolanaSwap = useSolanaSwap();
   const executeRelay = useRelay();
+  const { executeLimitOrder: executeLimitOrderV1 } = useJupiterTrigger();
+  const { executeLimitOrder: executeLimitOrderV2 } = useJupiterTriggerV2();
+
+  // Route price-triggered orders through V2 (vault-based custody, real
+  // orderId, no per-fill prompts). Time-triggered orders go through V1
+  // because the time scheduler doesn't care which trigger generation we used.
+  // Falls back to V1 if NEXT_PUBLIC_DISABLE_TRIGGER_V2=true is set, so we can
+  // kill the V2 path remotely without a redeploy if Jupiter has an incident.
+  const triggerV2Disabled = process.env.NEXT_PUBLIC_DISABLE_TRIGGER_V2 === 'true';
+  const executeLimitOrder = async (
+    intent: ChatLimitOrderIntent,
+    opts: { CID?: string | null } = {}
+  ) => {
+    if (triggerV2Disabled || intent.type === 'LIMIT_ORDER_TIME_INTENT') {
+      return executeLimitOrderV1(intent, opts);
+    }
+    return executeLimitOrderV2(intent, opts);
+  };
+
+  /**
+   * Checks the user's Solana wallet for enough of `tokenSymbol` to fill
+   * `requiredAmount` (human-readable, e.g. "0.5").
+   * Returns null when the balance is sufficient, or a friendly message string
+   * describing the shortfall and suggesting a swap.
+   */
+  const checkSolanaTokenBalance = async (
+    tokenSymbol: string,
+    requiredAmount: string
+  ): Promise<string | null> => {
+    const required = parseFloat(requiredAmount);
+    if (!Number.isFinite(required) || required <= 0) return null;
+
+    const solanaAddress = solanaWallets?.[0]?.address;
+    if (!solanaAddress) return null;
+
+    try {
+      const accessToken = await getAccessToken();
+      const res = await fetch('/api/balances', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          chain: 'SOLANA_MAINNET',
+          walletAddress: solanaAddress,
+          forceRefresh: true,
+          ...(accessToken ? { accessToken } : {}),
+        }),
+      });
+      if (!res.ok) return null;
+      const data = (await res.json()) as { tokens?: Record<string, { balance?: string; symbol?: string }> };
+      const tokens = data?.tokens ?? {};
+
+      // Look up by exact symbol (case-insensitive).
+      const sym = tokenSymbol.toUpperCase();
+      const entry = Object.values(tokens).find((t) => (t.symbol ?? '').toUpperCase() === sym);
+      const balance = parseFloat(entry?.balance ?? '0');
+      if (!Number.isFinite(balance)) return null;
+
+      if (balance < required) {
+        const shortfall = (required - balance).toFixed(6).replace(/\.?0+$/, '');
+        const haveStr = balance.toFixed(6).replace(/\.?0+$/, '');
+        return (
+          `You don't have enough ${sym} to place this order. ` +
+          `You have ${haveStr} ${sym} but need ${required} ${sym} ` +
+          `— a shortfall of ${shortfall} ${sym}. ` +
+          `Would you like to swap another token for the extra ${sym} first?`
+        );
+      }
+    } catch {
+      // Best-effort — don't block execution on a balance check failure.
+    }
+    return null;
+  };
+
+  /** Maps known Jupiter / upstream error strings to friendly messages. */
+  const friendlyLimitOrderError = (raw: string): string => {
+    if (/at least \d+ USD/i.test(raw)) {
+      const match = raw.match(/at least (\d+) USD/i);
+      const min = match?.[1] ?? '10';
+      return (
+        `This order is too small — Jupiter requires a minimum order value of $${min} USD. ` +
+        `Try increasing your order size so the total value exceeds $${min}.`
+      );
+    }
+    if (/insufficient.*funds?|not enough.*balance/i.test(raw)) {
+      return 'You don\'t have enough funds in your wallet to place this order.';
+    }
+    if (/vault/i.test(raw) && /register/i.test(raw)) {
+      return 'Your trading vault isn\'t set up yet. Please try again — it\'ll be created automatically.';
+    }
+    return raw;
+  };
+
+  const { wallets: evmWallets } = useWallets();
   const { executeLend } = useJupiterLend();
-  const { executeLimitOrder } = useJupiterTrigger();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -1346,14 +1440,17 @@ export default function Chat() {
       if (button.action.kind === 'RUN_LOCAL') {
         const isLendRowTemplate = (template: ChatButtonRowModel['template']): template is 'CONFIRM_LEND_DEPOSIT' | 'CONFIRM_LEND_WITHDRAW' =>
           template === 'CONFIRM_LEND_DEPOSIT' || template === 'CONFIRM_LEND_WITHDRAW';
+        // For limit orders we delay the "live" confirmation until after the
+        // execution promise resolves, so we don't show success before we know
+        // the order was actually accepted.
         const instantMessage = button.action.actionId === 'CONFIRM_SWAP'
           ? getRandomSwapSubmittedMessage()
           : isLendRowTemplate(row.template)
             ? getRandomLendSubmittedMessage(row.template)
             : button.action.actionId === 'CONFIRM_LIMIT_ORDER'
-              ? getRandomLimitOrderSubmittedMessage()
+              ? null
               : button.action.presetAssistantMessage;
-        addInstantAssistantMessage(instantMessage);
+        if (instantMessage) addInstantAssistantMessage(instantMessage);
         if (button.action.actionId === 'CANCEL_SWAP') {
           setPendingIntent(null);
           console.log('[ChatButtonRow] action cancel swap', { rowId: row.id });
@@ -1369,18 +1466,53 @@ export default function Chat() {
             addInstantAssistantMessage('Limit order intent was lost — please re-issue the order.');
             return;
           }
+          const limitIntent = intent as ChatLimitOrderIntent;
+
+          // Pre-flight: check the user has enough of the sell token.
+          const balanceError = await checkSolanaTokenBalance(limitIntent.sell, limitIntent.amount);
+          if (balanceError) {
+            addInstantAssistantMessage(balanceError);
+            return;
+          }
+
+          // For time-triggered orders the server needs to sign on the user's
+          // behalf when the scheduled time arrives. Request Privy wallet
+          // delegation now — right before confirming — so the user understands
+          // exactly why the permission is needed. Privy is idempotent: if the
+          // wallet is already delegated this resolves immediately without a
+          // prompt, so repeat orders never re-trigger the UI.
+          if (limitIntent.type === 'LIMIT_ORDER_TIME_INTENT') {
+            const solanaAddress = solanaWallets?.[0]?.address;
+            if (!solanaAddress) {
+              addInstantAssistantMessage('No Solana wallet connected. Please connect your wallet first.');
+              return;
+            }
+            try {
+              await delegateWallet({ address: solanaAddress, chainType: 'solana' });
+            } catch (delegateErr) {
+              const msg = delegateErr instanceof Error ? delegateErr.message : String(delegateErr);
+              // User rejected the delegation prompt — don't schedule the order.
+              addInstantAssistantMessage(
+                `Scheduled orders require a one-time permission so Altair can execute the trade on your behalf when the time arrives. ${msg}`
+              );
+              return;
+            }
+          }
+
           try {
-            const result = await executeLimitOrder(intent as ChatLimitOrderIntent, {
+            const result = await executeLimitOrder(limitIntent, {
               CID: row.context?.cid ?? null,
             });
+            // Only show success message once execution has confirmed.
+            const submitted = getRandomLimitOrderSubmittedMessage();
             const tail = result.kind === 'time'
-              ? `Scheduled for ${intent.runAt ?? 'the requested time'}.`
-              : `Trigger at ${intent.targetPrice} ${(intent.quoteCurrency ?? 'USDC').toUpperCase()}/${intent.sell.toUpperCase()}.`;
+              ? `Scheduled for ${limitIntent.runAt ?? 'the requested time'}.`
+              : `Trigger at ${limitIntent.targetPrice} ${(limitIntent.quoteCurrency ?? 'USDC').toUpperCase()}/${limitIntent.sell.toUpperCase()}.`;
             const txTail = result.txHash ? ` tx ${result.txHash.slice(0, 8)}…` : '';
-            addInstantAssistantMessage(`${tail}${txTail}`);
+            addInstantAssistantMessage(`${submitted} ${tail}${txTail}`);
           } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            addInstantAssistantMessage(`Limit order failed: ${msg}`);
+            const raw = err instanceof Error ? err.message : String(err);
+            addInstantAssistantMessage(friendlyLimitOrderError(raw));
           }
           return;
         }
